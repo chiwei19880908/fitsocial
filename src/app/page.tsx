@@ -18,6 +18,8 @@ import {
   Trophy,
   Loader2,
   LogOut,
+  X,
+  Clock,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useRouter } from "next/navigation"
@@ -41,8 +43,12 @@ export default function HomePage() {
   const [selectedMood, setSelectedMood] = useState<string>("")
   const [selectedDistance, setSelectedDistance] = useState<string>("")
   const [selectedDuration, setSelectedDuration] = useState<number>(30)
-  const [exercises, setExercises] = useState<{ name: string; sets: number; reps: number }[]>([
-    { name: "", sets: 3, reps: 10 }
+  type WorkoutItem = 
+    | { id: string; type: 'exercise'; name: string; sets: number; reps: number }
+    | { id: string; type: 'rest'; duration: number }
+
+  const [workoutItems, setWorkoutItems] = useState<WorkoutItem[]>([
+    { id: '1', type: 'exercise', name: '', sets: 3, reps: 10 }
   ])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [workouts, setWorkouts] = useState<WorkoutLogWithProfile[]>([])
@@ -70,6 +76,9 @@ export default function HomePage() {
   const durationOptions = [15, 30, 45, 60, 90]
   const setsOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   const repsOptions = [5, 8, 10, 12, 15, 20]
+  const restOptions = [30, 60, 90, 120]
+
+  const exercisePresets = ["臥推", "深蹲", "硬舉", "肩推", "划船", "二頭", "三頭", "腹肌", "小腿", "核心"]
 
   const categories = workoutType === "aerobic"
     ? ["LSD", "间歇", "配速跑"]
@@ -101,11 +110,15 @@ export default function HomePage() {
       if (workoutType === "aerobic") {
         description = `${selectedDistance || "一般"}・${selectedDuration}分鐘・${selectedMood}`
       } else {
-        const exerciseList = exercises
-          .filter(e => e.name)
-          .map(e => `${e.name} ${e.sets}x${e.reps}`)
-          .join("、")
-        description = `${exerciseList}・${selectedMood}`
+        const parts: string[] = []
+        workoutItems.forEach((item) => {
+          if (item.type === 'exercise' && item.name) {
+            parts.push(`${item.name} ${item.sets}x${item.reps}`)
+          } else if (item.type === 'rest') {
+            parts.push(`休息 ${item.duration}秒`)
+          }
+        })
+        description = `${parts.join("・")}・${selectedMood}`
       }
 
       const details = { description }
@@ -133,7 +146,34 @@ export default function HomePage() {
     setSelectedMood("")
     setSelectedDistance("")
     setSelectedDuration(30)
-    setExercises([{ name: "", sets: 3, reps: 10 }])
+    setWorkoutItems([{ id: '1', type: 'exercise', name: '', sets: 3, reps: 10 }])
+  }
+
+  const addExercise = () => {
+    setWorkoutItems([
+      ...workoutItems,
+      { id: Date.now().toString(), type: 'exercise', name: '', sets: 3, reps: 10 }
+    ])
+  }
+
+  const addRest = () => {
+    const lastExerciseIndex = workoutItems.map((item, i) => item.type === 'exercise' ? i : -1).filter(i => i >= 0).pop() ?? -1
+    const insertIndex = lastExerciseIndex >= 0 ? lastExerciseIndex + 1 : workoutItems.length
+    const newItems = [...workoutItems]
+    newItems.splice(insertIndex, 0, { id: Date.now().toString(), type: 'rest', duration: 60 })
+    setWorkoutItems(newItems)
+  }
+
+  const removeItem = (id: string) => {
+    if (workoutItems.length > 1) {
+      setWorkoutItems(workoutItems.filter(item => item.id !== id))
+    }
+  }
+
+  const updateItem = (id: string, updates: Partial<WorkoutItem>) => {
+    setWorkoutItems(workoutItems.map(item => 
+      item.id === id ? { ...item, ...updates } as WorkoutItem : item
+    ))
   }
 
   const handleLike = async (workoutId: string) => {
@@ -498,62 +538,113 @@ export default function HomePage() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {exercises.map((exercise, index) => (
-                      <div key={index} className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={exercise.name}
-                          onChange={(e) => {
-                            const newExercises = [...exercises]
-                            newExercises[index].name = e.target.value
-                            setExercises(newExercises)
-                          }}
-                          placeholder="動作名稱"
-                          className="flex-1 px-4 py-2 rounded-xl border border-slate-200 focus:border-primary-500 outline-none"
-                        />
-                        <select
-                          value={exercise.sets}
-                          onChange={(e) => {
-                            const newExercises = [...exercises]
-                            newExercises[index].sets = Number(e.target.value)
-                            setExercises(newExercises)
-                          }}
-                          className="px-3 py-2 rounded-xl border border-slate-200 bg-white"
-                        >
-                          {setsOptions.map((s) => (
-                            <option key={s} value={s}>{s}組</option>
-                          ))}
-                        </select>
-                        <select
-                          value={exercise.reps}
-                          onChange={(e) => {
-                            const newExercises = [...exercises]
-                            newExercises[index].reps = Number(e.target.value)
-                            setExercises(newExercises)
-                          }}
-                          className="px-3 py-2 rounded-xl border border-slate-200 bg-white"
-                        >
-                          {repsOptions.map((r) => (
-                            <option key={r} value={r}>{r}下</option>
-                          ))}
-                        </select>
-                        {exercises.length > 1 && (
-                          <button
-                            onClick={() => setExercises(exercises.filter((_, i) => i !== index))}
-                            className="p-2 text-red-500 hover:bg-red-50 rounded-xl"
-                          >
-                            ✕
-                          </button>
+                    {workoutItems.map((item, index) => (
+                      <div key={item.id}>
+                        {item.type === 'exercise' ? (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium text-slate-400 w-6">{index + 1}</span>
+                            <div className="flex-1 flex items-center gap-2 flex-wrap">
+                              <input
+                                type="text"
+                                value={item.name}
+                                onChange={(e) => updateItem(item.id, { name: e.target.value })}
+                                placeholder="動作名稱"
+                                className="flex-1 min-w-[120px] px-4 py-2 rounded-xl border border-slate-200 focus:border-primary-500 outline-none"
+                              />
+                              <select
+                                value={item.sets}
+                                onChange={(e) => updateItem(item.id, { sets: Number(e.target.value) })}
+                                className="px-3 py-2 rounded-xl border border-slate-200 bg-white"
+                              >
+                                {setsOptions.map((s) => (
+                                  <option key={s} value={s}>{s}組</option>
+                                ))}
+                              </select>
+                              <select
+                                value={item.reps}
+                                onChange={(e) => updateItem(item.id, { reps: Number(e.target.value) })}
+                                className="px-3 py-2 rounded-xl border border-slate-200 bg-white"
+                              >
+                                {repsOptions.map((r) => (
+                                  <option key={r} value={r}>{r}下</option>
+                                ))}
+                              </select>
+                            </div>
+                            <button
+                              onClick={() => removeItem(item.id)}
+                              className="p-2 text-red-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 bg-blue-50 p-2 rounded-xl">
+                            <Clock className="w-4 h-4 text-blue-500 ml-1" />
+                            <span className="text-sm text-blue-600 font-medium">休息</span>
+                            <div className="flex gap-1">
+                              {restOptions.map((dur) => (
+                                <button
+                                  key={dur}
+                                  onClick={() => updateItem(item.id, { duration: dur })}
+                                  className={`px-3 py-1 rounded-lg text-sm transition-all ${
+                                    item.duration === dur
+                                      ? "bg-blue-500 text-white"
+                                      : "bg-white text-blue-600 hover:bg-blue-100"
+                                  }`}
+                                >
+                                  {dur}秒
+                                </button>
+                              ))}
+                            </div>
+                            <button
+                              onClick={() => removeItem(item.id)}
+                              className="ml-auto p-1 text-blue-400 hover:text-blue-500"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
                         )}
                       </div>
                     ))}
-                    <button
-                      onClick={() => setExercises([...exercises, { name: "", sets: 3, reps: 10 }])}
-                      className="w-full py-2 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 hover:border-primary-500 hover:text-primary-500 transition-all flex items-center justify-center gap-2"
-                    >
-                      <Plus className="w-4 h-4" />
-                      新增動作
-                    </button>
+                    
+                    <div className="flex gap-2">
+                      <button
+                        onClick={addExercise}
+                        className="flex-1 py-2 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 hover:border-primary-500 hover:text-primary-500 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Plus className="w-4 h-4" />
+                        下一個動作
+                      </button>
+                      <button
+                        onClick={addRest}
+                        className="flex-1 py-2 border-2 border-dashed border-blue-300 rounded-xl text-blue-500 hover:border-blue-500 hover:bg-blue-50 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Clock className="w-4 h-4" />
+                        休息時間
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-2">
+                      {exercisePresets.map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={() => {
+                            const emptyExercise = workoutItems.find(item => item.type === 'exercise' && !item.name)
+                            if (emptyExercise) {
+                              updateItem(emptyExercise.id, { name: preset })
+                            } else {
+                              setWorkoutItems([
+                                ...workoutItems,
+                                { id: Date.now().toString(), type: 'exercise', name: preset, sets: 3, reps: 10 }
+                              ])
+                            }
+                          }}
+                          className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-full text-sm transition-colors"
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -606,7 +697,7 @@ export default function HomePage() {
 
               <button
                 onClick={handleLogWorkout}
-                disabled={!selectedCategory || !selectedMood || isSubmitting || (workoutType === "strength" && !exercises.some(e => e.name))}
+                disabled={!selectedCategory || !selectedMood || isSubmitting || (workoutType === "strength" && !workoutItems.some(item => item.type === 'exercise' && item.name))}
                 className="w-full py-4 bg-gradient-to-r from-primary-500 to-accent-500 text-white font-bold rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-all flex items-center justify-center gap-2"
               >
                 {isSubmitting ? (
