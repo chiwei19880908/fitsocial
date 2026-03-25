@@ -2,6 +2,17 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function updateSession(request: NextRequest) {
+  const pathname = request.nextUrl.pathname
+  
+  const isAuthPage = pathname.startsWith('/auth')
+  const isProtectedRoute = pathname === '/' || 
+    pathname.startsWith('/profile') ||
+    pathname.startsWith('/workout')
+
+  if (!isAuthPage && !isProtectedRoute) {
+    return NextResponse.next()
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -32,11 +43,6 @@ export async function updateSession(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-
-  const isAuthPage = request.nextUrl.pathname.startsWith('/auth')
-  const isProtectedRoute = request.nextUrl.pathname === '/' || 
-    request.nextUrl.pathname.startsWith('/profile') ||
-    request.nextUrl.pathname.startsWith('/workout')
 
   if (!user && isProtectedRoute) {
     const url = request.nextUrl.clone()

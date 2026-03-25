@@ -81,13 +81,31 @@ export default function HomePage() {
     ],
   }
 
-  const distanceOptions = ["1km", "3km", "5km", "10km", "半馬", "全馬", "自訂"]
+  const distanceOptions = ["1km", "3km", "5km", "10km", "半馬", "全馬"]
   const durationOptions = [5, 10, 15, 20, 30, 45, 60, 90]
   const setsOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   const repsOptions = [5, 8, 10, 12, 15, 20]
   const restOptions = [30, 60, 90, 120, 180]
 
   const exercisePresets = ["臥推", "深蹲", "硬舉", "肩推", "划船", "二頭", "三頭", "腹肌", "小腿", "核心"]
+
+  const aerobicPresets: Record<string, { distance: string; duration: number }[]> = {
+    LSD: [
+      { distance: "5km", duration: 30 },
+      { distance: "10km", duration: 60 },
+      { distance: "半馬", duration: 120 },
+    ],
+    "间歇": [
+      { distance: "400m", duration: 3 },
+      { distance: "800m", duration: 5 },
+      { distance: "1km", duration: 8 },
+    ],
+    "配速跑": [
+      { distance: "5km", duration: 25 },
+      { distance: "10km", duration: 50 },
+      { distance: "半馬", duration: 105 },
+    ],
+  }
 
   const categories = workoutType === "aerobic"
     ? ["LSD", "间歇", "配速跑"]
@@ -397,23 +415,34 @@ export default function HomePage() {
                       <div className="space-y-2">
                         {(workout.details as { description?: string })?.description?.split("・").filter((p, i, arr) => i < arr.length - 1).map((item, i) => {
                           const isRest = item.includes("休息")
-                          const match = item.match(/([\S]+)\s*(\d+)\s*(分|秒)/)
-                          return isRest ? (
-                            <div key={i} className="flex items-center gap-2 bg-indigo-100/50 rounded-xl px-3 py-2">
-                              <Clock className="w-4 h-4 text-indigo-500" />
-                              <span className="text-sm text-indigo-600 font-medium">休息 {item.match(/\d+/)?.[0]} 秒</span>
-                            </div>
-                          ) : match ? (
-                            <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
-                              <div className="flex items-center gap-2">
-                                <Activity className="w-4 h-4 text-blue-500" />
-                                <span className="font-medium text-slate-700">{match[1]}</span>
+                          const parts = item.trim().split(/\s+/)
+                          
+                          if (isRest) {
+                            const seconds = item.match(/\d+/)?.[0] || "60"
+                            return (
+                              <div key={i} className="flex items-center gap-2 bg-indigo-100/50 rounded-xl px-3 py-2">
+                                <Clock className="w-4 h-4 text-indigo-500" />
+                                <span className="text-sm text-indigo-600 font-medium">休息 {seconds}秒</span>
                               </div>
-                              <div className="flex items-center gap-3 text-sm">
-                                <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{match[2]}{match[3]}</span>
+                            )
+                          }
+                          
+                          const distance = parts[0] || ""
+                          const durationMatch = item.match(/(\d+)(?:分|$)/)
+                          const duration = durationMatch ? durationMatch[1] : ""
+                          
+                          if (distance || duration) {
+                            return (
+                              <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <Activity className="w-4 h-4 text-blue-500" />
+                                  <span className="font-medium text-slate-700">{distance}</span>
+                                </div>
+                                <span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-medium">{duration}分</span>
                               </div>
-                            </div>
-                          ) : null
+                            )
+                          }
+                          return null
                         })}
                       </div>
                     </div>
@@ -619,25 +648,35 @@ export default function HomePage() {
                           <div className="flex items-center gap-2 flex-wrap bg-blue-50 p-3 rounded-xl">
                             <span className="text-sm font-medium text-blue-600 w-6">#{index + 1}</span>
                             <div className="flex-1 flex items-center gap-2 flex-wrap">
-                              <select
-                                value={seg.distance}
-                                onChange={(e) => updateAerobicSegment(seg.id, { distance: e.target.value })}
-                                className="px-3 py-2 rounded-xl border border-blue-200 bg-white"
-                              >
-                                {distanceOptions.filter(d => d !== '自訂').map((d) => (
-                                  <option key={d} value={d}>{d}</option>
+                              <div className="flex flex-wrap gap-1">
+                                {distanceOptions.map((d) => (
+                                  <button
+                                    key={d}
+                                    onClick={() => updateAerobicSegment(seg.id, { distance: d })}
+                                    className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
+                                      seg.distance === d
+                                        ? "bg-blue-500 text-white"
+                                        : "bg-white text-blue-600 hover:bg-blue-100"
+                                    }`}
+                                  >
+                                    {d}
+                                  </button>
                                 ))}
-                              </select>
-                              <div className="flex items-center gap-1">
-                                <select
-                                  value={seg.duration}
-                                  onChange={(e) => updateAerobicSegment(seg.id, { duration: Number(e.target.value) })}
-                                  className="px-3 py-2 rounded-xl border border-blue-200 bg-white"
-                                >
-                                  {durationOptions.map((d) => (
-                                    <option key={d} value={d}>{d}分</option>
-                                  ))}
-                                </select>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {durationOptions.map((d) => (
+                                  <button
+                                    key={d}
+                                    onClick={() => updateAerobicSegment(seg.id, { duration: d })}
+                                    className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
+                                      seg.duration === d
+                                        ? "bg-blue-500 text-white"
+                                        : "bg-white text-blue-600 hover:bg-blue-100"
+                                    }`}
+                                  >
+                                    {d}分
+                                  </button>
+                                ))}
                               </div>
                             </div>
                             <button
