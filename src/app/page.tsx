@@ -43,6 +43,15 @@ export default function HomePage() {
   const [selectedMood, setSelectedMood] = useState<string>("")
   const [selectedDistance, setSelectedDistance] = useState<string>("")
   const [selectedDuration, setSelectedDuration] = useState<number>(30)
+  
+  type AerobicSegment = 
+    | { id: string; type: 'run'; distance: string; duration: number }
+    | { id: string; type: 'rest'; duration: number }
+
+  const [aerobicSegments, setAerobicSegments] = useState<AerobicSegment[]>([
+    { id: '1', type: 'run', distance: '5km', duration: 30 }
+  ])
+
   type WorkoutItem = 
     | { id: string; type: 'exercise'; name: string; sets: number; reps: number }
     | { id: string; type: 'rest'; duration: number }
@@ -72,11 +81,11 @@ export default function HomePage() {
     ],
   }
 
-  const distanceOptions = ["1km", "3km", "5km", "10km", "半馬", "全馬"]
-  const durationOptions = [15, 30, 45, 60, 90]
+  const distanceOptions = ["1km", "3km", "5km", "10km", "半馬", "全馬", "自訂"]
+  const durationOptions = [5, 10, 15, 20, 30, 45, 60, 90]
   const setsOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   const repsOptions = [5, 8, 10, 12, 15, 20]
-  const restOptions = [30, 60, 90, 120]
+  const restOptions = [30, 60, 90, 120, 180]
 
   const exercisePresets = ["臥推", "深蹲", "硬舉", "肩推", "划船", "二頭", "三頭", "腹肌", "小腿", "核心"]
 
@@ -108,7 +117,15 @@ export default function HomePage() {
     try {
       let description = selectedMood
       if (workoutType === "aerobic") {
-        description = `${selectedDistance || "一般"}・${selectedDuration}分鐘・${selectedMood}`
+        const parts: string[] = []
+        aerobicSegments.forEach((seg) => {
+          if (seg.type === 'run') {
+            parts.push(`${seg.distance} ${seg.duration}分`)
+          } else {
+            parts.push(`休息 ${seg.duration}秒`)
+          }
+        })
+        description = `${parts.join(" → ")}・${selectedMood}`
       } else {
         const parts: string[] = []
         workoutItems.forEach((item) => {
@@ -118,7 +135,7 @@ export default function HomePage() {
             parts.push(`休息 ${item.duration}秒`)
           }
         })
-        description = `${parts.join("・")}・${selectedMood}`
+        description = `${parts.join(" → ")}・${selectedMood}`
       }
 
       const details = { description }
@@ -146,7 +163,35 @@ export default function HomePage() {
     setSelectedMood("")
     setSelectedDistance("")
     setSelectedDuration(30)
+    setAerobicSegments([{ id: '1', type: 'run', distance: '5km', duration: 30 }])
     setWorkoutItems([{ id: '1', type: 'exercise', name: '', sets: 3, reps: 10 }])
+  }
+
+  const addAerobicRun = () => {
+    setAerobicSegments([
+      ...aerobicSegments,
+      { id: Date.now().toString(), type: 'run', distance: '5km', duration: 30 }
+    ])
+  }
+
+  const addAerobicRest = () => {
+    const lastRunIndex = aerobicSegments.map((seg, i) => seg.type === 'run' ? i : -1).filter(i => i >= 0).pop() ?? -1
+    const insertIndex = lastRunIndex >= 0 ? lastRunIndex + 1 : aerobicSegments.length
+    const newSegments = [...aerobicSegments]
+    newSegments.splice(insertIndex, 0, { id: Date.now().toString(), type: 'rest', duration: 60 })
+    setAerobicSegments(newSegments)
+  }
+
+  const removeAerobicSegment = (id: string) => {
+    if (aerobicSegments.length > 1) {
+      setAerobicSegments(aerobicSegments.filter(seg => seg.id !== id))
+    }
+  }
+
+  const updateAerobicSegment = (id: string, updates: Partial<AerobicSegment>) => {
+    setAerobicSegments(aerobicSegments.map(seg => 
+      seg.id === id ? { ...seg, ...updates } as AerobicSegment : seg
+    ))
   }
 
   const addExercise = () => {
@@ -349,13 +394,27 @@ export default function HomePage() {
 
                   {workout.type === "aerobic" ? (
                     <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 mb-3">
-                      <div className="flex items-center justify-around text-center">
-                        {(workout.details as { description?: string })?.description?.split("・").slice(0, 2).map((part, i) => (
-                          <div key={i} className="flex flex-col">
-                            <span className="text-2xl font-bold text-blue-600">{part.replace(/[^0-9]/g, "")}</span>
-                            <span className="text-xs text-blue-500">{part.includes("km") ? "公里" : "分鐘"}</span>
-                          </div>
-                        ))}
+                      <div className="space-y-2">
+                        {(workout.details as { description?: string })?.description?.split("・").filter((p, i, arr) => i < arr.length - 1).map((item, i) => {
+                          const isRest = item.includes("休息")
+                          const match = item.match(/([\S]+)\s*(\d+)\s*(分|秒)/)
+                          return isRest ? (
+                            <div key={i} className="flex items-center gap-2 bg-indigo-100/50 rounded-xl px-3 py-2">
+                              <Clock className="w-4 h-4 text-indigo-500" />
+                              <span className="text-sm text-indigo-600 font-medium">休息 {item.match(/\d+/)?.[0]} 秒</span>
+                            </div>
+                          ) : match ? (
+                            <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                              <div className="flex items-center gap-2">
+                                <Activity className="w-4 h-4 text-blue-500" />
+                                <span className="font-medium text-slate-700">{match[1]}</span>
+                              </div>
+                              <div className="flex items-center gap-3 text-sm">
+                                <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">{match[2]}{match[3]}</span>
+                              </div>
+                            </div>
+                          ) : null
+                        })}
                       </div>
                     </div>
                   ) : (
@@ -550,23 +609,90 @@ export default function HomePage() {
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-3">
-                  {workoutType === "aerobic" ? "距離" : "動作"}
+                  {workoutType === "aerobic" ? "訓練流程" : "動作"}
                 </label>
                 {workoutType === "aerobic" ? (
-                  <div className="flex flex-wrap gap-2">
-                    {distanceOptions.map((dist) => (
-                      <button
-                        key={dist}
-                        onClick={() => setSelectedDistance(dist)}
-                        className={`px-4 py-2 rounded-full transition-all ${
-                          selectedDistance === dist
-                            ? "bg-primary-500 text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        {dist}
-                      </button>
+                  <div className="space-y-3">
+                    {aerobicSegments.map((seg, index) => (
+                      <div key={seg.id}>
+                        {seg.type === 'run' ? (
+                          <div className="flex items-center gap-2 flex-wrap bg-blue-50 p-3 rounded-xl">
+                            <span className="text-sm font-medium text-blue-600 w-6">#{index + 1}</span>
+                            <div className="flex-1 flex items-center gap-2 flex-wrap">
+                              <select
+                                value={seg.distance}
+                                onChange={(e) => updateAerobicSegment(seg.id, { distance: e.target.value })}
+                                className="px-3 py-2 rounded-xl border border-blue-200 bg-white"
+                              >
+                                {distanceOptions.filter(d => d !== '自訂').map((d) => (
+                                  <option key={d} value={d}>{d}</option>
+                                ))}
+                              </select>
+                              <div className="flex items-center gap-1">
+                                <select
+                                  value={seg.duration}
+                                  onChange={(e) => updateAerobicSegment(seg.id, { duration: Number(e.target.value) })}
+                                  className="px-3 py-2 rounded-xl border border-blue-200 bg-white"
+                                >
+                                  {durationOptions.map((d) => (
+                                    <option key={d} value={d}>{d}分</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => removeAerobicSegment(seg.id)}
+                              className="p-2 text-blue-400 hover:text-blue-600 hover:bg-blue-100 rounded-xl transition-colors"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2 bg-indigo-50 p-2 rounded-xl">
+                            <Clock className="w-4 h-4 text-indigo-500 ml-2" />
+                            <span className="text-sm text-indigo-600 font-medium">休息</span>
+                            <div className="flex gap-1">
+                              {restOptions.map((dur) => (
+                                <button
+                                  key={dur}
+                                  onClick={() => updateAerobicSegment(seg.id, { duration: dur })}
+                                  className={`px-3 py-1 rounded-lg text-sm transition-all ${
+                                    seg.duration === dur
+                                      ? "bg-indigo-500 text-white"
+                                      : "bg-white text-indigo-600 hover:bg-indigo-100"
+                                  }`}
+                                >
+                                  {dur}秒
+                                </button>
+                              ))}
+                            </div>
+                            <button
+                              onClick={() => removeAerobicSegment(seg.id)}
+                              className="ml-auto p-1 text-indigo-400 hover:text-indigo-600"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     ))}
+                    
+                    <div className="flex gap-2">
+                      <button
+                        onClick={addAerobicRun}
+                        className="flex-1 py-2 border-2 border-dashed border-blue-300 rounded-xl text-blue-500 hover:border-blue-500 hover:bg-blue-50 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Activity className="w-4 h-4" />
+                        下一段跑步
+                      </button>
+                      <button
+                        onClick={addAerobicRest}
+                        className="flex-1 py-2 border-2 border-dashed border-indigo-300 rounded-xl text-indigo-500 hover:border-indigo-500 hover:bg-indigo-50 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Clock className="w-4 h-4" />
+                        休息時間
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="space-y-3">
