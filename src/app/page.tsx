@@ -347,9 +347,41 @@ export default function HomePage() {
                     </span>
                   </div>
 
-                  <p className="text-slate-700 mb-4">
-                    {(workout.details as { description?: string })?.description || ""}
-                  </p>
+                  {workout.type === "aerobic" ? (
+                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 mb-3">
+                      <div className="flex items-center justify-around text-center">
+                        {(workout.details as { description?: string })?.description?.split("・").slice(0, 2).map((part, i) => (
+                          <div key={i} className="flex flex-col">
+                            <span className="text-2xl font-bold text-blue-600">{part.replace(/[^0-9]/g, "")}</span>
+                            <span className="text-xs text-blue-500">{part.includes("km") ? "公里" : "分鐘"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-4 mb-3">
+                      <div className="space-y-2">
+                        {(workout.details as { description?: string })?.description?.split("・").filter((p, i, arr) => i < arr.length - 1).map((item, i, arr) => {
+                          const isRest = item.includes("休息")
+                          const match = item.match(/(\S+)\s*(\d+)x(\d+)/)
+                          return isRest ? (
+                            <div key={i} className="flex items-center gap-2 text-blue-500">
+                              <Clock className="w-4 h-4" />
+                              <span className="text-sm">休息 {item.match(/\d+/)?.[0]} 秒</span>
+                            </div>
+                          ) : match ? (
+                            <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                              <span className="font-medium text-slate-700">{match[1]}</span>
+                              <div className="flex items-center gap-3 text-sm">
+                                <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">{match[2]}組</span>
+                                <span className="bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full">{match[3]}下</span>
+                              </div>
+                            </div>
+                          ) : null
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                     <button
