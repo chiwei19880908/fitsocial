@@ -1,113 +1,175 @@
-"use client";
+"use client"
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react"
 import {
   Activity,
   Dumbbell,
   Heart,
-  Users,
-  TrendingUp,
-  Flame,
-  Trophy,
-  Plus,
-  ChevronRight,
-  Target,
-  Zap,
-  Timer,
-  Play,
-  Bookmark,
   MessageCircle,
   Share2,
   Home,
   Search,
   Bell,
   User,
-} from "lucide-react";
-
-type WorkoutType = "aerobic" | "strength";
-type Intensity = "easy" | "moderate" | "hard";
-type AerobicCategory = "LSD" | "间歇" | "配速跑";
-type StrengthCategory = "胸部" | "背部" | "腿部" | "肩部" | "手臂";
-
-interface WorkoutLog {
-  id: number;
-  type: WorkoutType;
-  category: string;
-  intensity: Intensity;
-  details: string;
-  likes: number;
-  comments: number;
-  shares: number;
-  timestamp: Date;
-  user: {
-    name: string;
-    avatar: string;
-    streak: number;
-  };
-}
-
-const mockWorkouts: WorkoutLog[] = [
-  {
-    id: 1,
-    type: "aerobic",
-    category: "LSD",
-    intensity: "easy",
-    details: "10公里，配速5:30/km",
-    likes: 24,
-    comments: 5,
-    shares: 2,
-    timestamp: new Date(Date.now() - 3600000),
-    user: { name: "小明", avatar: "🎾", streak: 15 },
-  },
-  {
-    id: 2,
-    type: "strength",
-    category: "胸部",
-    intensity: "hard",
-    details: "臥推 4x8啞鈴、飛鳥 3x12、伏地挺身 3x15",
-    likes: 45,
-    comments: 12,
-    shares: 6,
-    timestamp: new Date(Date.now() - 7200000),
-    user: { name: "阿偉", avatar: "⚽", streak: 30 },
-  },
-  {
-    id: 3,
-    type: "aerobic",
-    category: "间歇",
-    intensity: "hard",
-    details: "400m x 8組，休息90秒",
-    likes: 18,
-    comments: 3,
-    shares: 1,
-    timestamp: new Date(Date.now() - 14400000),
-    user: { name: "跑步小琳", avatar: "🏃‍♀️", streak: 7 },
-  },
-];
+  Plus,
+  Bookmark,
+  Flame,
+  TrendingUp,
+  Trophy,
+  Loader2,
+  LogOut,
+} from "lucide-react"
+import { useAuth } from "@/contexts/AuthContext"
+import { useRouter } from "next/navigation"
+import {
+  getWorkoutLogs,
+  createWorkoutLog,
+  toggleLike,
+  saveWorkoutAsTemplate,
+  WorkoutLogWithProfile,
+} from "@/lib/api/workouts"
+import { WorkoutType, Intensity } from "@/lib/supabase/types"
 
 export default function HomePage() {
-  const [activeTab, setActiveTab] = useState<"home" | "search" | "add" | "bell" | "profile">("home");
-  const [showWorkoutModal, setShowWorkoutModal] = useState(false);
-  const [workoutType, setWorkoutType] = useState<WorkoutType>("aerobic");
-  const [selectedIntensity, setSelectedIntensity] = useState<Intensity>("moderate");
-  const [selectedCategory, setSelectedCategory] = useState<string>("");
-  const [workoutDetails, setWorkoutDetails] = useState("");
-  const [currentStreak] = useState(12);
-  const [weeklyLoad] = useState(85);
+  const { user, profile, isLoading: authLoading, signOut } = useAuth()
+  const router = useRouter()
+  const [activeTab, setActiveTab] = useState<"home" | "search" | "add" | "bell" | "profile">("home")
+  const [showWorkoutModal, setShowWorkoutModal] = useState(false)
+  const [workoutType, setWorkoutType] = useState<WorkoutType>("aerobic")
+  const [selectedIntensity, setSelectedIntensity] = useState<Intensity>("moderate")
+  const [selectedCategory, setSelectedCategory] = useState<string>("")
+  const [selectedMood, setSelectedMood] = useState<string>("")
+  const [selectedDistance, setSelectedDistance] = useState<string>("")
+  const [selectedDuration, setSelectedDuration] = useState<number>(30)
+  const [exercises, setExercises] = useState<{ name: string; sets: number; reps: number }[]>([
+    { name: "", sets: 3, reps: 10 }
+  ])
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [workouts, setWorkouts] = useState<WorkoutLogWithProfile[]>([])
+  const [isLoadingWorkouts, setIsLoadingWorkouts] = useState(true)
+
+  const moodBubbles: Record<Intensity, { emoji: string; label: string }[]> = {
+    easy: [
+      { emoji: "🧁", label: "一塊小蛋糕" },
+      { emoji: "💪", label: "我還能做一組" },
+      { emoji: "🌟", label: "我超強的！" },
+    ],
+    moderate: [
+      { emoji: "😊", label: "感覺良好" },
+      { emoji: "🔥", label: "今天狀態不錯" },
+      { emoji: "📈", label: "突破自己了" },
+    ],
+    hard: [
+      { emoji: "💀", label: "差點死在健身房" },
+      { emoji: "🏆", label: "挑戰極限成功" },
+      { emoji: "🎯", label: "達成目標！" },
+    ],
+  }
+
+  const distanceOptions = ["1km", "3km", "5km", "10km", "半馬", "全馬"]
+  const durationOptions = [15, 30, 45, 60, 90]
+  const setsOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  const repsOptions = [5, 8, 10, 12, 15, 20]
 
   const categories = workoutType === "aerobic"
     ? ["LSD", "间歇", "配速跑"]
-    : ["胸部", "背部", "腿部", "肩部", "手臂"];
+    : ["胸部", "背部", "腿部", "肩部", "手臂"]
 
-  const handleLogWorkout = () => {
-    console.log({ workoutType, selectedCategory, selectedIntensity, workoutDetails });
-    setShowWorkoutModal(false);
-    setWorkoutDetails("");
-  };
+  const loadWorkouts = useCallback(async () => {
+    if (!user) return
+    setIsLoadingWorkouts(true)
+    try {
+      const data = await getWorkoutLogs(user.id)
+      setWorkouts(data)
+    } catch (error) {
+      console.error("Failed to load workouts:", error)
+    } finally {
+      setIsLoadingWorkouts(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    loadWorkouts()
+  }, [loadWorkouts])
+
+  const handleLogWorkout = async () => {
+    if (!user || !selectedCategory || !selectedMood) return
+
+    setIsSubmitting(true)
+    try {
+      let description = selectedMood
+      if (workoutType === "aerobic") {
+        description = `${selectedDistance || "一般"}・${selectedDuration}分鐘・${selectedMood}`
+      } else {
+        const exerciseList = exercises
+          .filter(e => e.name)
+          .map(e => `${e.name} ${e.sets}x${e.reps}`)
+          .join("、")
+        description = `${exerciseList}・${selectedMood}`
+      }
+
+      const details = { description }
+
+      await createWorkoutLog(
+        user.id,
+        workoutType,
+        selectedCategory,
+        selectedIntensity,
+        details
+      )
+
+      setShowWorkoutModal(false)
+      resetForm()
+      await loadWorkouts()
+    } catch (error) {
+      console.error("Failed to create workout:", error)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const resetForm = () => {
+    setSelectedCategory("")
+    setSelectedMood("")
+    setSelectedDistance("")
+    setSelectedDuration(30)
+    setExercises([{ name: "", sets: 3, reps: 10 }])
+  }
+
+  const handleLike = async (workoutId: string) => {
+    if (!user) return
+
+    const isNowLiked = await toggleLike(workoutId, user.id)
+    setWorkouts((prev) =>
+      prev.map((w) =>
+        w.id === workoutId
+          ? { ...w, is_liked: isNowLiked, likes: isNowLiked ? w.likes + 1 : w.likes - 1 }
+          : w
+      )
+    )
+  }
+
+  const handleSaveTemplate = async (workoutId: string) => {
+    if (!user) return
+
+    const isSaved = await saveWorkoutAsTemplate(workoutId, user.id)
+    setWorkouts((prev) =>
+      prev.map((w) =>
+        w.id === workoutId ? { ...w, is_template: isSaved } : w
+      )
+    )
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+        <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
-      {/* Header */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur-md border-b border-slate-200">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -118,16 +180,24 @@ export default function HomePage() {
               FitSocial
             </span>
           </div>
-          <div className="flex items-center gap-2 bg-primary-50 px-3 py-1.5 rounded-full">
-            <Flame className="w-4 h-4 text-orange-500" />
-            <span className="font-bold text-primary-700">{currentStreak}天</span>
+          <div className="flex items-center gap-3">
+            {profile && (
+              <div className="flex items-center gap-2 bg-primary-50 px-3 py-1.5 rounded-full">
+                <Flame className="w-4 h-4 text-orange-500" />
+                <span className="font-bold text-primary-700">{profile.streak_count}天</span>
+              </div>
+            )}
+            <button
+              onClick={signOut}
+              className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-lg mx-auto pb-20">
-        {/* Stats Cards */}
         <div className="px-4 py-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
@@ -137,7 +207,7 @@ export default function HomePage() {
                 </div>
                 <span className="text-slate-500 text-sm">連勝天數</span>
               </div>
-              <p className="text-3xl font-bold text-slate-800">{currentStreak}</p>
+              <p className="text-3xl font-bold text-slate-800">{profile?.streak_count ?? 0}</p>
               <p className="text-xs text-green-500 mt-1">比上週 +3</p>
             </div>
 
@@ -148,17 +218,13 @@ export default function HomePage() {
                 </div>
                 <span className="text-slate-500 text-sm">本週負荷</span>
               </div>
-              <p className="text-3xl font-bold text-slate-800">{weeklyLoad}%</p>
+              <p className="text-3xl font-bold text-slate-800">85%</p>
               <div className="w-full h-2 bg-slate-100 rounded-full mt-2 overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all"
-                  style={{ width: `${weeklyLoad}%` }}
-                />
+                <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full w-[85%]" />
               </div>
             </div>
           </div>
 
-          {/* Quick Actions */}
           <div className="bg-gradient-to-r from-primary-500 to-accent-500 rounded-3xl p-5 text-white">
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-lg">快速紀錄</h3>
@@ -175,85 +241,109 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Workout Feed */}
         <div className="px-4">
           <h2 className="font-bold text-lg text-slate-800 mb-4">動態</h2>
-          <div className="space-y-4">
-            {mockWorkouts.map((workout) => (
-              <div
-                key={workout.id}
-                className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100"
-              >
-                <div className="flex items-center gap-3 mb-4">
-                  <div className="w-12 h-12 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full flex items-center justify-center text-2xl">
-                    {workout.user.avatar}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-800">{workout.user.name}</span>
-                      <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">
-                        🔥 {workout.user.streak}
-                      </span>
+          {isLoadingWorkouts ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 text-primary-500 animate-spin" />
+            </div>
+          ) : workouts.length === 0 ? (
+            <div className="bg-white rounded-3xl p-8 text-center">
+              <p className="text-slate-500">還沒有運動紀錄</p>
+              <p className="text-slate-400 text-sm mt-2">成為第一個記錄的人！</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {workouts.map((workout) => (
+                <div
+                  key={workout.id}
+                  className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100"
+                >
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-12 h-12 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full flex items-center justify-center text-2xl">
+                      {workout.profiles?.avatar_url || "🏃"}
                     </div>
-                    <p className="text-xs text-slate-400">
-                      {workout.timestamp.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}
-                    </p>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-800">
+                          {workout.profiles?.username || "未知用戶"}
+                        </span>
+                        <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">
+                          🔥 {workout.profiles?.streak_count || 0}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400">
+                        {new Date(workout.created_at).toLocaleTimeString("zh-TW", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mb-3">
+                    <span
+                      className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        workout.type === "aerobic"
+                          ? "bg-blue-100 text-blue-600"
+                          : "bg-purple-100 text-purple-600"
+                      }`}
+                    >
+                      {workout.type === "aerobic" ? "🏃 有氧" : "💪 肌力"}
+                    </span>
+                    <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-sm">
+                      {workout.category}
+                    </span>
+                    <span
+                      className={`px-3 py-1 rounded-full text-sm ${
+                        workout.intensity === "easy"
+                          ? "bg-green-100 text-green-600"
+                          : workout.intensity === "moderate"
+                          ? "bg-yellow-100 text-yellow-600"
+                          : "bg-red-100 text-red-600"
+                      }`}
+                    >
+                      {workout.intensity === "easy" ? "休閒" : workout.intensity === "moderate" ? "適中" : "激烈"}
+                    </span>
+                  </div>
+
+                  <p className="text-slate-700 mb-4">
+                    {(workout.details as { description?: string })?.description || ""}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                    <button
+                      onClick={() => handleLike(workout.id)}
+                      className={`flex items-center gap-1 transition-colors ${
+                        workout.is_liked ? "text-pink-500" : "text-slate-400 hover:text-pink-500"
+                      }`}
+                    >
+                      <Heart className={`w-5 h-5 ${workout.is_liked ? "fill-pink-500" : ""}`} />
+                      <span className="text-sm">{workout.likes}</span>
+                    </button>
+                    <button className="flex items-center gap-1 text-slate-400 hover:text-blue-500 transition-colors">
+                      <MessageCircle className="w-5 h-5" />
+                      <span className="text-sm">{workout.comment_count || 0}</span>
+                    </button>
+                    <button className="flex items-center gap-1 text-slate-400 hover:text-green-500 transition-colors">
+                      <Share2 className="w-5 h-5" />
+                      <span className="text-sm">{workout.shares}</span>
+                    </button>
+                    <button
+                      onClick={() => handleSaveTemplate(workout.id)}
+                      className="flex items-center gap-1 text-slate-400 hover:text-accent-500 transition-colors"
+                    >
+                      <Bookmark className={`w-5 h-5 ${workout.is_template ? "fill-accent-500 text-accent-500" : ""}`} />
+                      <span className="text-sm">學習</span>
+                    </button>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-2 mb-3">
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm font-medium ${
-                      workout.type === "aerobic"
-                        ? "bg-blue-100 text-blue-600"
-                        : "bg-purple-100 text-purple-600"
-                    }`}
-                  >
-                    {workout.type === "aerobic" ? "🏃 有氧" : "💪 肌力"}
-                  </span>
-                  <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-sm">
-                    {workout.category}
-                  </span>
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm ${
-                      workout.intensity === "easy"
-                        ? "bg-green-100 text-green-600"
-                        : workout.intensity === "moderate"
-                        ? "bg-yellow-100 text-yellow-600"
-                        : "bg-red-100 text-red-600"
-                    }`}
-                  >
-                    {workout.intensity === "easy" ? "休閒" : workout.intensity === "moderate" ? "適中" : "激烈"}
-                  </span>
-                </div>
-
-                <p className="text-slate-700 mb-4">{workout.details}</p>
-
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                  <button className="flex items-center gap-1 text-slate-400 hover:text-pink-500 transition-colors">
-                    <Heart className="w-5 h-5" />
-                    <span className="text-sm">{workout.likes}</span>
-                  </button>
-                  <button className="flex items-center gap-1 text-slate-400 hover:text-blue-500 transition-colors">
-                    <MessageCircle className="w-5 h-5" />
-                    <span className="text-sm">{workout.comments}</span>
-                  </button>
-                  <button className="flex items-center gap-1 text-slate-400 hover:text-green-500 transition-colors">
-                    <Share2 className="w-5 h-5" />
-                    <span className="text-sm">{workout.shares}</span>
-                  </button>
-                  <button className="flex items-center gap-1 text-slate-400 hover:text-accent-500 transition-colors">
-                    <Bookmark className="w-5 h-5" />
-                    <span className="text-sm">學習</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200">
         <div className="max-w-lg mx-auto flex justify-around py-3">
           {[
@@ -266,8 +356,8 @@ export default function HomePage() {
             <button
               key={item.id}
               onClick={() => {
-                if (item.id === "add") setShowWorkoutModal(true);
-                else setActiveTab(item.id as typeof activeTab);
+                if (item.id === "add") setShowWorkoutModal(true)
+                else setActiveTab(item.id as typeof activeTab)
               }}
               className={`flex flex-col items-center gap-1 ${
                 item.primary
@@ -290,7 +380,6 @@ export default function HomePage() {
         </div>
       </nav>
 
-      {/* Workout Modal */}
       {showWorkoutModal && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50">
           <div className="bg-white rounded-t-4xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -305,14 +394,13 @@ export default function HomePage() {
             </div>
 
             <div className="p-6 space-y-6">
-              {/* Workout Type */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-3">運動類型</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => {
-                      setWorkoutType("aerobic");
-                      setSelectedCategory("");
+                      setWorkoutType("aerobic")
+                      setSelectedCategory("")
                     }}
                     className={`p-4 rounded-2xl border-2 transition-all ${
                       workoutType === "aerobic"
@@ -327,8 +415,8 @@ export default function HomePage() {
                   </button>
                   <button
                     onClick={() => {
-                      setWorkoutType("strength");
-                      setSelectedCategory("");
+                      setWorkoutType("strength")
+                      setSelectedCategory("")
                     }}
                     className={`p-4 rounded-2xl border-2 transition-all ${
                       workoutType === "strength"
@@ -344,7 +432,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Category */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-3">
                   {workoutType === "aerobic" ? "訓練類型" : "訓練部位"}
@@ -366,7 +453,6 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Intensity */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-3">強度</label>
                 <div className="flex gap-2">
@@ -390,50 +476,152 @@ export default function HomePage() {
                 </div>
               </div>
 
-              {/* Details */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-3">
-                  {workoutType === "aerobic" ? "距離與時間" : "動作細節"}
+                  {workoutType === "aerobic" ? "距離" : "動作"}
                 </label>
-                <textarea
-                  value={workoutDetails}
-                  onChange={(e) => setWorkoutDetails(e.target.value)}
-                  placeholder={
-                    workoutType === "aerobic"
-                      ? "例如：5公里，30分鐘"
-                      : "例如：臥推 4x8、深蹲 3x10"
-                  }
-                  className="w-full h-24 p-4 rounded-2xl border border-slate-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-200 outline-none resize-none"
-                />
+                {workoutType === "aerobic" ? (
+                  <div className="flex flex-wrap gap-2">
+                    {distanceOptions.map((dist) => (
+                      <button
+                        key={dist}
+                        onClick={() => setSelectedDistance(dist)}
+                        className={`px-4 py-2 rounded-full transition-all ${
+                          selectedDistance === dist
+                            ? "bg-primary-500 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {dist}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {exercises.map((exercise, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={exercise.name}
+                          onChange={(e) => {
+                            const newExercises = [...exercises]
+                            newExercises[index].name = e.target.value
+                            setExercises(newExercises)
+                          }}
+                          placeholder="動作名稱"
+                          className="flex-1 px-4 py-2 rounded-xl border border-slate-200 focus:border-primary-500 outline-none"
+                        />
+                        <select
+                          value={exercise.sets}
+                          onChange={(e) => {
+                            const newExercises = [...exercises]
+                            newExercises[index].sets = Number(e.target.value)
+                            setExercises(newExercises)
+                          }}
+                          className="px-3 py-2 rounded-xl border border-slate-200 bg-white"
+                        >
+                          {setsOptions.map((s) => (
+                            <option key={s} value={s}>{s}組</option>
+                          ))}
+                        </select>
+                        <select
+                          value={exercise.reps}
+                          onChange={(e) => {
+                            const newExercises = [...exercises]
+                            newExercises[index].reps = Number(e.target.value)
+                            setExercises(newExercises)
+                          }}
+                          className="px-3 py-2 rounded-xl border border-slate-200 bg-white"
+                        >
+                          {repsOptions.map((r) => (
+                            <option key={r} value={r}>{r}下</option>
+                          ))}
+                        </select>
+                        {exercises.length > 1 && (
+                          <button
+                            onClick={() => setExercises(exercises.filter((_, i) => i !== index))}
+                            className="p-2 text-red-500 hover:bg-red-50 rounded-xl"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setExercises([...exercises, { name: "", sets: 3, reps: 10 }])}
+                      className="w-full py-2 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 hover:border-primary-500 hover:text-primary-500 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      新增動作
+                    </button>
+                  </div>
+                )}
               </div>
 
-              {/* Quick Emojis */}
+              {workoutType === "aerobic" && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-3">時間</label>
+                  <div className="flex gap-2">
+                    {durationOptions.map((dur) => (
+                      <button
+                        key={dur}
+                        onClick={() => setSelectedDuration(dur)}
+                        className={`flex-1 py-3 rounded-xl transition-all ${
+                          selectedDuration === dur
+                            ? "bg-primary-500 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {dur}分
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-3">心情（選填）</label>
-                <div className="flex gap-3">
-                  {["💪", "🔥", "😊", "😓", "🥱", "✨"].map((emoji) => (
+                <label className="block text-sm font-medium text-slate-700 mb-3">
+                  感受一下 {
+                    selectedIntensity === "easy" ? "🟢 休閒" : 
+                    selectedIntensity === "moderate" ? "🟡 適中" : "🔴 激烈"
+                  }
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {moodBubbles[selectedIntensity].map((mood) => (
                     <button
-                      key={emoji}
-                      className="w-12 h-12 rounded-full bg-slate-100 hover:bg-slate-200 text-2xl transition-all"
+                      key={mood.emoji}
+                      onClick={() => setSelectedMood(mood.label)}
+                      className={`px-4 py-3 rounded-2xl transition-all flex items-center gap-2 ${
+                        selectedMood === mood.label
+                          ? "bg-gradient-to-r from-primary-500 to-accent-500 text-white"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
                     >
-                      {emoji}
+                      <span className="text-xl">{mood.emoji}</span>
+                      <span className="text-sm font-medium">{mood.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Submit Button */}
               <button
                 onClick={handleLogWorkout}
-                disabled={!selectedCategory || !workoutDetails}
-                className="w-full py-4 bg-gradient-to-r from-primary-500 to-accent-500 text-white font-bold rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-all"
+                disabled={!selectedCategory || !selectedMood || isSubmitting || (workoutType === "strength" && !exercises.some(e => e.name))}
+                className="w-full py-4 bg-gradient-to-r from-primary-500 to-accent-500 text-white font-bold rounded-2xl disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-all flex items-center justify-center gap-2"
               >
-                完成紀錄
+                {isSubmitting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    儲存中...
+                  </>
+                ) : (
+                  "完成紀錄"
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
     </div>
-  );
+  )
 }
