@@ -65,6 +65,8 @@ export default function HomePage() {
   const [isEditingUsername, setIsEditingUsername] = useState(false)
   const [editUsernameValue, setEditUsernameValue] = useState("")
   const [isSavingUsername, setIsSavingUsername] = useState(false)
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
+  const [selectedWorkoutDetail, setSelectedWorkoutDetail] = useState<WorkoutLogWithProfile | null>(null)
   const [workouts, setWorkouts] = useState<WorkoutLogWithProfile[]>([])
   const [isLoadingWorkouts, setIsLoadingWorkouts] = useState(true)
 
@@ -81,7 +83,7 @@ export default function HomePage() {
       { emoji: "📈", label: "突破自己了" },
     ],
     hard: [
-      { emoji: "💀", label: "差點死在健身房" },
+      { emoji: "💀", label: "差點死掉" },
       { emoji: "🏆", label: "挑戰極限成功" },
       { emoji: "🎯", label: "達成目標！" },
     ],
@@ -729,9 +731,55 @@ export default function HomePage() {
         {activeTab === "profile" && (
           <div className="px-4 py-6 space-y-4">
             <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex items-center gap-4">
-              <div className="w-16 h-16 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full flex items-center justify-center text-3xl">
-                {profile?.avatar_url || "🏋"}
-              </div>
+              <label className="relative cursor-pointer group flex-shrink-0">
+                <div className="w-16 h-16 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full flex items-center justify-center text-3xl overflow-hidden">
+                  {profile?.avatar_url
+                    ? <img src={profile.avatar_url} alt="avatar" className="w-full h-full object-cover" />
+                    : <span>🏋</span>}
+                  {isUploadingAvatar && (
+                    <div className="absolute inset-0 bg-black/40 rounded-full flex items-center justify-center">
+                      <Loader2 className="w-5 h-5 text-white animate-spin" />
+                    </div>
+                  )}
+                </div>
+                <div className="absolute inset-0 bg-black/30 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Pencil className="w-4 h-4 text-white" />
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={isUploadingAvatar}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0]
+                    if (!file || !user) return
+                    setIsUploadingAvatar(true)
+                    try {
+                      const { createClient } = await import("@/lib/supabase/client")
+                      const supabase = createClient()
+                      const ext = file.name.split(".").pop()
+                      const path = `${user.id}/avatar.${ext}`
+                      const { error: upErr } = await supabase.storage
+                        .from("avatars")
+                        .upload(path, file, { upsert: true })
+                      if (upErr) throw upErr
+                      const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(path)
+                      const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`
+                      const { error: dbErr } = await supabase
+                        .from("profiles")
+                        .update({ avatar_url: publicUrl })
+                        .eq("id", user.id)
+                      if (dbErr) throw dbErr
+                      await refreshProfile()
+                    } catch (err) {
+                      console.error("Avatar upload failed:", err)
+                    } finally {
+                      setIsUploadingAvatar(false)
+                      e.target.value = ""
+                    }
+                  }}
+                />
+              </label>
               <div className="flex-1 min-w-0">
                 {isEditingUsername ? (
                   <div className="flex items-center gap-2">
@@ -797,7 +845,11 @@ export default function HomePage() {
               <p className="text-sm font-medium text-slate-500 mb-3">我的運動紀錄</p>
               <div className="space-y-2">
                 {workouts.filter(w => w.user_id === user?.id).slice(0, 5).map(w => (
-                  <div key={w.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                  <button
+                    key={w.id}
+                    onClick={() => setSelectedWorkoutDetail(w)}
+                    className="w-full flex items-center justify-between py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 rounded-xl px-2 -mx-2 transition-colors"
+                  >
                     <div className="flex items-center gap-2">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
                         w.type === "aerobic" ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600"
@@ -805,7 +857,7 @@ export default function HomePage() {
                       <span className="text-sm text-slate-700">{w.category}</span>
                     </div>
                     <span className="text-xs text-slate-400">{new Date(w.created_at).toLocaleDateString("zh-TW")}</span>
-                  </div>
+                  </button>
                 ))}
                 {workouts.filter(w => w.user_id === user?.id).length === 0 && (
                   <p className="text-sm text-slate-400 text-center py-2">還沒有紀錄</p>
@@ -823,6 +875,146 @@ export default function HomePage() {
           </div>
         )}
       </main>
+
+      {/* 運動紀錄細節 Modal */}
+      {selectedWorkoutDetail && (() => {
+        const w = selectedWorkoutDetail
+        const d = w.details as {
+          segments?: Array<{ type: string; distance?: string; duration?: number; name?: string; sets?: number; reps?: number }>
+          mood?: string
+        }
+        type AeroSeg = { type: 'run'; distance: string; duration: number } | { type: 'rest'; duration: number }
+        type StrSeg = { type: 'exercise'; name: string; sets: number; reps: number } | { type: 'rest'; duration: number }
+        function eqAero(a: AeroSeg, b: AeroSeg) {
+          if (a.type !== b.type) return false
+          if (a.type === 'run' && b.type === 'run') return a.distance === b.distance && a.duration === b.duration
+          if (a.type === 'rest' && b.type === 'rest') return a.duration === b.duration
+          return false
+        }
+        function eqStr(a: StrSeg, b: StrSeg) {
+          if (a.type !== b.type) return false
+          if (a.type === 'exercise' && b.type === 'exercise') return a.name === b.name && a.sets === b.sets && a.reps === b.reps
+          if (a.type === 'rest' && b.type === 'rest') return a.duration === b.duration
+          return false
+        }
+        function groupSegs<T>(segs: T[], eq: (a: T, b: T) => boolean) {
+          const gs: { pattern: T[]; count: number }[] = []
+          let i = 0
+          while (i < segs.length) {
+            let bw = 1, bc = 1
+            for (let w2 = 1; w2 <= Math.floor((segs.length - i) / 2); w2++) {
+              const pat = segs.slice(i, i + w2)
+              let c = 1, j = i + w2
+              while (j + w2 <= segs.length && pat.every((s, k) => eq(s, segs[j + k]))) { c++; j += w2 }
+              if (c > 1 && w2 * c >= bw * bc) { bw = w2; bc = c }
+            }
+            gs.push({ pattern: segs.slice(i, i + bw), count: bc })
+            i += bw * bc
+          }
+          return gs
+        }
+        return (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setSelectedWorkoutDetail(null)}>
+            <div className="bg-white w-full max-w-lg rounded-t-3xl p-6 pb-10 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="font-bold text-lg text-slate-800">{w.category}</p>
+                  <p className="text-xs text-slate-400">{new Date(w.created_at).toLocaleDateString("zh-TW", { year: "numeric", month: "long", day: "numeric" })}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    w.intensity === "easy" ? "bg-green-100 text-green-600" :
+                    w.intensity === "moderate" ? "bg-yellow-100 text-yellow-600" :
+                    "bg-red-100 text-red-600"
+                  }`}>{w.intensity === "easy" ? "休閒" : w.intensity === "moderate" ? "適中" : "激烈"}</span>
+                  {d?.mood && <span className="text-xl">{d.mood}</span>}
+                  <button onClick={() => setSelectedWorkoutDetail(null)} className="text-slate-400 hover:text-slate-600 ml-2">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {d?.segments ? (
+                w.type === "aerobic" ? (() => {
+                  const segs = d.segments as AeroSeg[]
+                  const groups = groupSegs(segs, eqAero)
+                  return (
+                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 space-y-2">
+                      {groups.map((g, gi) => (
+                        <div key={gi} className="flex items-start gap-2">
+                          <div className="flex-1 space-y-1">
+                            {g.pattern.map((seg, si) =>
+                              seg.type === 'run' ? (
+                                <div key={si} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <Activity className="w-4 h-4 text-blue-500" />
+                                    <span className="font-medium text-slate-700 text-sm">跑步 {seg.distance}</span>
+                                  </div>
+                                  <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-medium">{seg.duration}分</span>
+                                </div>
+                              ) : (
+                                <div key={si} className="flex items-center gap-2 bg-indigo-100/50 rounded-xl px-3 py-2">
+                                  <Clock className="w-4 h-4 text-indigo-400" />
+                                  <span className="text-sm text-indigo-600">
+                                    休息 {(seg as { duration: number }).duration >= 60
+                                      ? `${(seg as { duration: number }).duration / 60}分鐘`
+                                      : `${(seg as { duration: number }).duration}秒`}
+                                  </span>
+                                </div>
+                              )
+                            )}
+                          </div>
+                          {g.count > 1 && (
+                            <span className="mt-1 shrink-0 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full self-center">×{g.count}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })() : (() => {
+                  const segs = d.segments as StrSeg[]
+                  const groups = groupSegs(segs, eqStr)
+                  return (
+                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-4 space-y-2">
+                      {groups.map((g, gi) => (
+                        <div key={gi} className="flex items-start gap-2">
+                          <div className="flex-1 space-y-1">
+                            {g.pattern.map((seg, si) =>
+                              seg.type === 'exercise' ? (
+                                <div key={si} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <Dumbbell className="w-4 h-4 text-purple-500" />
+                                    <span className="font-medium text-slate-700 text-sm">{seg.name}</span>
+                                  </div>
+                                  <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full text-xs font-medium">{seg.sets}組 × {seg.reps}下</span>
+                                </div>
+                              ) : (
+                                <div key={si} className="flex items-center gap-2 bg-pink-100/50 rounded-xl px-3 py-2">
+                                  <Clock className="w-4 h-4 text-pink-400" />
+                                  <span className="text-sm text-pink-600">
+                                    休息 {(seg as { duration: number }).duration >= 60
+                                      ? `${(seg as { duration: number }).duration / 60}分鐘`
+                                      : `${(seg as { duration: number }).duration}秒`}
+                                  </span>
+                                </div>
+                              )
+                            )}
+                          </div>
+                          {g.count > 1 && (
+                            <span className="mt-1 shrink-0 bg-purple-500 text-white text-xs font-bold px-2 py-0.5 rounded-full self-center">×{g.count}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()
+              ) : (
+                <p className="text-sm text-slate-400 text-center py-4">無詳細資料</p>
+              )}
+            </div>
+          </div>
+        )
+      })()}
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200">
         <div className="max-w-lg mx-auto flex justify-around py-3">
