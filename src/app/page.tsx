@@ -361,17 +361,13 @@ export default function HomePage() {
                 <span className="font-bold text-primary-700">{profile.streak_count}天</span>
               </div>
             )}
-            <button
-              onClick={signOut}
-              className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
           </div>
         </div>
       </header>
 
       <main className="max-w-lg mx-auto pb-20">
+        {activeTab === "home" && (
+          <>
         <div className="px-4 py-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
@@ -382,7 +378,6 @@ export default function HomePage() {
                 <span className="text-slate-500 text-sm">連勝天數</span>
               </div>
               <p className="text-3xl font-bold text-slate-800">{profile?.streak_count ?? 0}</p>
-              <p className="text-xs text-green-500 mt-1">比上週 +3</p>
             </div>
 
             <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
@@ -390,12 +385,28 @@ export default function HomePage() {
                 <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-indigo-500 rounded-2xl flex items-center justify-center">
                   <TrendingUp className="w-5 h-5 text-white" />
                 </div>
-                <span className="text-slate-500 text-sm">本週負荷</span>
+                <span className="text-slate-500 text-sm">本週訓練</span>
               </div>
-              <p className="text-3xl font-bold text-slate-800">85%</p>
-              <div className="w-full h-2 bg-slate-100 rounded-full mt-2 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full w-[85%]" />
-              </div>
+              {(() => {
+                const now = new Date()
+                const startOfWeek = new Date(now)
+                startOfWeek.setHours(0, 0, 0, 0)
+                startOfWeek.setDate(now.getDate() - now.getDay())
+                const myWorkoutsThisWeek = workouts.filter(
+                  w => w.user_id === user?.id && new Date(w.created_at) >= startOfWeek
+                )
+                const count = myWorkoutsThisWeek.length
+                const pct = Math.min(count / 7 * 100, 100)
+                return (
+                  <>
+                    <p className="text-3xl font-bold text-slate-800">{count} <span className="text-base font-normal text-slate-400">天</span></p>
+                    <div className="w-full h-2 bg-slate-100 rounded-full mt-2 overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    <p className="text-xs text-slate-400 mt-1">目標 7 天</p>
+                  </>
+                )
+              })()}
             </div>
           </div>
 
@@ -691,6 +702,69 @@ export default function HomePage() {
             </div>
           )}
         </div>
+          </>
+        )}
+
+        {activeTab === "search" && (
+          <div className="px-4 py-8 text-center">
+            <Search className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <p className="font-bold text-slate-700">探索</p>
+            <p className="text-sm text-slate-400 mt-1">搜尋用戶、訓練計畫即將上線</p>
+          </div>
+        )}
+
+        {activeTab === "bell" && (
+          <div className="px-4 py-8 text-center">
+            <Bell className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+            <p className="font-bold text-slate-700">通知</p>
+            <p className="text-sm text-slate-400 mt-1">目前無新通知</p>
+          </div>
+        )}
+
+        {activeTab === "profile" && (
+          <div className="px-4 py-6 space-y-4">
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex items-center gap-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full flex items-center justify-center text-3xl">
+                {profile?.avatar_url || "🏋"}
+              </div>
+              <div>
+                <p className="font-bold text-lg text-slate-800">{profile?.username || user?.email}</p>
+                <p className="text-sm text-slate-400">{user?.email}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">🔥 {profile?.streak_count ?? 0} 天連勝</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100">
+              <p className="text-sm font-medium text-slate-500 mb-3">我的運動紀錄</p>
+              <div className="space-y-2">
+                {workouts.filter(w => w.user_id === user?.id).slice(0, 5).map(w => (
+                  <div key={w.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        w.type === "aerobic" ? "bg-blue-100 text-blue-600" : "bg-purple-100 text-purple-600"
+                      }`}>{w.type === "aerobic" ? "🏃" : "💪"}</span>
+                      <span className="text-sm text-slate-700">{w.category}</span>
+                    </div>
+                    <span className="text-xs text-slate-400">{new Date(w.created_at).toLocaleDateString("zh-TW")}</span>
+                  </div>
+                ))}
+                {workouts.filter(w => w.user_id === user?.id).length === 0 && (
+                  <p className="text-sm text-slate-400 text-center py-2">還沒有紀錄</p>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={signOut}
+              className="w-full flex items-center justify-center gap-2 py-4 bg-white border border-red-100 text-red-500 font-medium rounded-2xl hover:bg-red-50 transition-colors shadow-sm"
+            >
+              <LogOut className="w-5 h-5" />
+              登出
+            </button>
+          </div>
+        )}
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200">
