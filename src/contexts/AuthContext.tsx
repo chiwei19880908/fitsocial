@@ -172,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null)
       setProfile(null)
       setSession(null)
+      window.location.href = '/auth/login'
     } catch (error) {
       console.error('Sign out failed:', error)
       throw error

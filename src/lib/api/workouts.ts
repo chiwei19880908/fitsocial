@@ -162,10 +162,63 @@ export async function createWorkoutLog(
       .single()
 
     if (error) throw error
+
+    // 建立紀錄後自動更新 streak_count
+    await updateStreak(supabase, userId)
+
     return data
   } catch (error) {
     console.error('createWorkoutLog error:', error)
     throw error
+  }
+}
+
+/**
+ * 更新連勝天數：檢查昨天是否有運動，決定 +1 或重置為 1
+ */
+async function updateStreak(supabase: ReturnType<typeof createClient>, userId: string) {
+  try {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const yesterday = new Date(today)
+    yesterday.setDate(yesterday.getDate() - 1)
+
+    // 今天是否已有其他紀錄（避免同一天多次加）
+    const { data: todayLogs } = await supabase
+      .from('workout_logs')
+      .select('id')
+      .eq('user_id', userId)
+      .gte('created_at', today.toISOString())
+      .limit(2)
+
+    // 若今天已有 2 筆以上（本次插入 + 至少 1 筆舊的），表示 streak 已計算過
+    if (todayLogs && todayLogs.length >= 2) return
+
+    // 昨天是否有紀錄
+    const { data: yesterdayLogs } = await supabase
+      .from('workout_logs')
+      .select('id')
+      .eq('user_id', userId)
+      .gte('created_at', yesterday.toISOString())
+      .lt('created_at', today.toISOString())
+      .limit(1)
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('streak_count')
+      .eq('id', userId)
+      .single()
+
+    const currentStreak = profile?.streak_count ?? 0
+    const newStreak = yesterdayLogs && yesterdayLogs.length > 0 ? currentStreak + 1 : 1
+
+    await supabase
+      .from('profiles')
+      .update({ streak_count: newStreak })
+      .eq('id', userId)
+  } catch (err) {
+    // streak 更新失敗不中斷主流程
+    console.warn('updateStreak error:', err)
   }
 }
 
