@@ -32,7 +32,7 @@ export async function getWorkoutLogs(userId?: string, limit = 20) {
   if (!data) return []
 
   const logsWithMeta = await Promise.all(
-    data.map(async (log) => {
+    data.map(async (log: WorkoutLog) => {
       const [commentCount, likeStatus] = await Promise.all([
         supabase
           .from('comments')
