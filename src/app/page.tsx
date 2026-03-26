@@ -82,12 +82,31 @@ export default function HomePage() {
     ],
   }), [])
 
-  const distanceOptions = useMemo(() => ["1km", "3km", "5km", "10km", "半馬", "全馬"], [])
-  const durationOptions = useMemo(() => [5, 10, 15, 20, 30, 45, 60, 90], [])
   const setsOptions = useMemo(() => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [])
   const repsOptions = useMemo(() => [5, 8, 10, 12, 15, 20], [])
   const restOptions = useMemo(() => [30, 60, 90, 120, 180], [])
   const exercisePresets = useMemo(() => ["臥推", "深蹲", "硬舉", "肩推", "划船", "二頭", "三頭", "腹肌", "小腿", "核心"], [])
+
+  // 距離/時間依訓練類型分流
+  const categoryDistanceOptions: Record<string, string[]> = useMemo(() => ({
+    LSD: ["1km", "3km", "5km", "10km", "半馬", "全馬"],
+    "间歇": ["100m", "200m", "300m", "400m", "600m", "800m", "1km"],
+    "配速跑": ["400m", "800m", "1km", "3km", "5km", "10km", "半馬"],
+  }), [])
+  // 間歇用秒數，LSD/配速跑用分鐘
+  const categoryDurationOptions: Record<string, { value: number; label: string }[]> = useMemo(() => ({
+    LSD: [5, 10, 15, 20, 30, 45, 60, 90].map(v => ({ value: v, label: `${v}分` })),
+    "间歇": [30, 45, 60, 90, 120, 180, 240, 300].map(v => ({ value: v, label: v >= 60 ? `${v / 60}分` : `${v}秒` })),
+    "配速跑": [5, 10, 15, 20, 30, 45, 60, 90].map(v => ({ value: v, label: `${v}分` })),
+  }), [])
+
+  const currentDistanceOptions = useMemo(() =>
+    categoryDistanceOptions[selectedCategory] ?? categoryDistanceOptions.LSD
+  , [selectedCategory, categoryDistanceOptions])
+
+  const currentDurationOptions = useMemo(() =>
+    categoryDurationOptions[selectedCategory] ?? categoryDurationOptions.LSD
+  , [selectedCategory, categoryDurationOptions])
 
   const aerobicPresets = useMemo(() => ({
     LSD: [
@@ -96,14 +115,14 @@ export default function HomePage() {
       { distance: "半馬", duration: 120 },
     ],
     "间歇": [
-      { distance: "400m", duration: 3 },
-      { distance: "800m", duration: 5 },
-      { distance: "1km", duration: 8 },
+      { distance: "400m", duration: 90 },
+      { distance: "800m", duration: 180 },
+      { distance: "1km", duration: 240 },
     ],
     "配速跑": [
       { distance: "5km", duration: 25 },
       { distance: "10km", duration: 50 },
-      { distance: "半馬", duration: 105 },
+      { distance: "半馬", duration: 90 },
     ],
   }), [])
 
@@ -212,11 +231,13 @@ export default function HomePage() {
   }, [])
 
   const addAerobicRun = useCallback(() => {
+    const distList = categoryDistanceOptions[selectedCategory] ?? categoryDistanceOptions.LSD
+    const durList = categoryDurationOptions[selectedCategory] ?? categoryDurationOptions.LSD
     setAerobicSegments(prev => [
       ...prev,
-      { id: Date.now().toString(), type: 'run', distance: '5km', duration: 30 }
+      { id: Date.now().toString(), type: 'run', distance: distList[0], duration: durList[0].value }
     ])
-  }, [])
+  }, [selectedCategory, categoryDistanceOptions, categoryDurationOptions])
 
   const addAerobicRest = useCallback(() => {
     setAerobicSegments(prev => {
@@ -417,13 +438,18 @@ export default function HomePage() {
                       {workout.profiles?.avatar_url || "🏃"}
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-slate-800">
                           {workout.profiles?.username || "未知用戶"}
                         </span>
                         <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">
                           🔥 {workout.profiles?.streak_count || 0}
                         </span>
+                        {(workout.details as { mood?: string })?.mood && (
+                          <span className="text-xs text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full">
+                            {(workout.details as { mood?: string }).mood}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-400">
                         {new Date(workout.created_at).toLocaleTimeString("zh-TW", {
@@ -812,7 +838,7 @@ export default function HomePage() {
                             <span className="text-sm font-medium text-blue-600 w-6">#{index + 1}</span>
                             <div className="flex-1 flex items-center gap-2 flex-wrap">
                               <div className="flex flex-wrap gap-1">
-                                {distanceOptions.map((d) => (
+                                {currentDistanceOptions.map((d) => (
                                   <button
                                     key={d}
                                     onClick={() => updateAerobicSegment(seg.id, { distance: d })}
@@ -827,17 +853,17 @@ export default function HomePage() {
                                 ))}
                               </div>
                               <div className="flex flex-wrap gap-1">
-                                {durationOptions.map((d) => (
+                                {currentDurationOptions.map(({ value, label }) => (
                                   <button
-                                    key={d}
-                                    onClick={() => updateAerobicSegment(seg.id, { duration: d })}
+                                    key={value}
+                                    onClick={() => updateAerobicSegment(seg.id, { duration: value })}
                                     className={`px-3 py-1.5 rounded-lg text-sm transition-all ${
-                                      seg.duration === d
+                                      seg.duration === value
                                         ? "bg-blue-500 text-white"
                                         : "bg-white text-blue-600 hover:bg-blue-100"
                                     }`}
                                   >
-                                    {d}分
+                                    {label}
                                   </button>
                                 ))}
                               </div>
@@ -1008,27 +1034,6 @@ export default function HomePage() {
                   </div>
                 )}
               </div>
-
-              {workoutType === "aerobic" && (
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-3">時間</label>
-                  <div className="flex gap-2">
-                    {durationOptions.map((dur) => (
-                      <button
-                        key={dur}
-                        onClick={() => setSelectedDuration(dur)}
-                        className={`flex-1 py-3 rounded-xl transition-all ${
-                          selectedDuration === dur
-                            ? "bg-primary-500 text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        {dur}分
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-3">
