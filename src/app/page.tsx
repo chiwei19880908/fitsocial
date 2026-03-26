@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import {
   Activity,
   Dumbbell,
@@ -24,7 +24,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext"
 import { useRouter } from "next/navigation"
 import {
-  getWorkoutLogs,
+  getWorkoutLogsQuick,
   createWorkoutLog,
   toggleLike,
   saveWorkoutAsTemplate,
@@ -63,7 +63,8 @@ export default function HomePage() {
   const [workouts, setWorkouts] = useState<WorkoutLogWithProfile[]>([])
   const [isLoadingWorkouts, setIsLoadingWorkouts] = useState(true)
 
-  const moodBubbles: Record<Intensity, { emoji: string; label: string }[]> = {
+  // 使用 useMemo 避免重複建立物件
+  const moodBubbles = useMemo(() => ({
     easy: [
       { emoji: "🧁", label: "一塊小蛋糕" },
       { emoji: "💪", label: "我還能做一組" },
@@ -79,17 +80,16 @@ export default function HomePage() {
       { emoji: "🏆", label: "挑戰極限成功" },
       { emoji: "🎯", label: "達成目標！" },
     ],
-  }
+  }), [])
 
-  const distanceOptions = ["1km", "3km", "5km", "10km", "半馬", "全馬"]
-  const durationOptions = [5, 10, 15, 20, 30, 45, 60, 90]
-  const setsOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  const repsOptions = [5, 8, 10, 12, 15, 20]
-  const restOptions = [30, 60, 90, 120, 180]
+  const distanceOptions = useMemo(() => ["1km", "3km", "5km", "10km", "半馬", "全馬"], [])
+  const durationOptions = useMemo(() => [5, 10, 15, 20, 30, 45, 60, 90], [])
+  const setsOptions = useMemo(() => [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [])
+  const repsOptions = useMemo(() => [5, 8, 10, 12, 15, 20], [])
+  const restOptions = useMemo(() => [30, 60, 90, 120, 180], [])
+  const exercisePresets = useMemo(() => ["臥推", "深蹲", "硬舉", "肩推", "划船", "二頭", "三頭", "腹肌", "小腿", "核心"], [])
 
-  const exercisePresets = ["臥推", "深蹲", "硬舉", "肩推", "划船", "二頭", "三頭", "腹肌", "小腿", "核心"]
-
-  const aerobicPresets: Record<string, { distance: string; duration: number }[]> = {
+  const aerobicPresets = useMemo(() => ({
     LSD: [
       { distance: "5km", duration: 30 },
       { distance: "10km", duration: 60 },
@@ -105,30 +105,38 @@ export default function HomePage() {
       { distance: "10km", duration: 50 },
       { distance: "半馬", duration: 105 },
     ],
-  }
+  }), [])
 
-  const categories = workoutType === "aerobic"
-    ? ["LSD", "间歇", "配速跑"]
-    : ["胸部", "背部", "腿部", "肩部", "手臂"]
+  const categories = useMemo(() => 
+    workoutType === "aerobic"
+      ? ["LSD", "间歇", "配速跑"]
+      : ["胸部", "背部", "腿部", "肩部", "手臂"],
+    [workoutType]
+  )
 
+  // ✅ 改進：使用 useCallback 優化載入邏輯
   const loadWorkouts = useCallback(async () => {
     if (!user) return
+    
     setIsLoadingWorkouts(true)
     try {
-      const data = await getWorkoutLogs(user.id)
+      // 使用快速版本避免並行 lock 問題
+      const data = await getWorkoutLogsQuick(20)
       setWorkouts(data)
     } catch (error) {
       console.error("Failed to load workouts:", error)
+      setWorkouts([])
     } finally {
       setIsLoadingWorkouts(false)
     }
   }, [user])
 
+  // 初始化時載入一次
   useEffect(() => {
     loadWorkouts()
   }, [loadWorkouts])
 
-  const handleLogWorkout = async () => {
+  const handleLogWorkout = useCallback(async () => {
     if (!user || !selectedCategory || !selectedMood) return
 
     setIsSubmitting(true)
@@ -171,97 +179,122 @@ export default function HomePage() {
       await loadWorkouts()
     } catch (error) {
       console.error("Failed to create workout:", error)
+      alert("運動紀錄保存失敗，請稍後重試")
     } finally {
       setIsSubmitting(false)
     }
-  }
+  }, [user, selectedCategory, selectedMood, workoutType, aerobicSegments, workoutItems, selectedIntensity, loadWorkouts])
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setSelectedCategory("")
     setSelectedMood("")
     setSelectedDistance("")
     setSelectedDuration(30)
     setAerobicSegments([{ id: '1', type: 'run', distance: '5km', duration: 30 }])
     setWorkoutItems([{ id: '1', type: 'exercise', name: '', sets: 3, reps: 10 }])
-  }
+  }, [])
 
-  const addAerobicRun = () => {
-    setAerobicSegments([
-      ...aerobicSegments,
+  const addAerobicRun = useCallback(() => {
+    setAerobicSegments(prev => [
+      ...prev,
       { id: Date.now().toString(), type: 'run', distance: '5km', duration: 30 }
     ])
-  }
+  }, [])
 
-  const addAerobicRest = () => {
-    const lastRunIndex = aerobicSegments.map((seg, i) => seg.type === 'run' ? i : -1).filter(i => i >= 0).pop() ?? -1
-    const insertIndex = lastRunIndex >= 0 ? lastRunIndex + 1 : aerobicSegments.length
-    const newSegments = [...aerobicSegments]
-    newSegments.splice(insertIndex, 0, { id: Date.now().toString(), type: 'rest', duration: 60 })
-    setAerobicSegments(newSegments)
-  }
+  const addAerobicRest = useCallback(() => {
+    setAerobicSegments(prev => {
+      const lastRunIndex = prev.map((seg, i) => seg.type === 'run' ? i : -1).filter(i => i >= 0).pop() ?? -1
+      const insertIndex = lastRunIndex >= 0 ? lastRunIndex + 1 : prev.length
+      const newSegments = [...prev]
+      newSegments.splice(insertIndex, 0, { id: Date.now().toString(), type: 'rest', duration: 60 })
+      return newSegments
+    })
+  }, [])
 
-  const removeAerobicSegment = (id: string) => {
-    if (aerobicSegments.length > 1) {
-      setAerobicSegments(aerobicSegments.filter(seg => seg.id !== id))
-    }
-  }
+  const removeAerobicSegment = useCallback((id: string) => {
+    setAerobicSegments(prev => {
+      if (prev.length > 1) {
+        return prev.filter(seg => seg.id !== id)
+      }
+      return prev
+    })
+  }, [])
 
-  const updateAerobicSegment = (id: string, updates: Partial<AerobicSegment>) => {
-    setAerobicSegments(aerobicSegments.map(seg => 
-      seg.id === id ? { ...seg, ...updates } as AerobicSegment : seg
-    ))
-  }
+  const updateAerobicSegment = useCallback((id: string, updates: Partial<AerobicSegment>) => {
+    setAerobicSegments(prev => 
+      prev.map(seg => 
+        seg.id === id ? { ...seg, ...updates } as AerobicSegment : seg
+      )
+    )
+  }, [])
 
-  const addExercise = () => {
-    setWorkoutItems([
-      ...workoutItems,
+  const addExercise = useCallback(() => {
+    setWorkoutItems(prev => [
+      ...prev,
       { id: Date.now().toString(), type: 'exercise', name: '', sets: 3, reps: 10 }
     ])
-  }
+  }, [])
 
-  const addRest = () => {
-    const lastExerciseIndex = workoutItems.map((item, i) => item.type === 'exercise' ? i : -1).filter(i => i >= 0).pop() ?? -1
-    const insertIndex = lastExerciseIndex >= 0 ? lastExerciseIndex + 1 : workoutItems.length
-    const newItems = [...workoutItems]
-    newItems.splice(insertIndex, 0, { id: Date.now().toString(), type: 'rest', duration: 60 })
-    setWorkoutItems(newItems)
-  }
+  const addRest = useCallback(() => {
+    setWorkoutItems(prev => {
+      const lastExerciseIndex = prev.map((item, i) => item.type === 'exercise' ? i : -1).filter(i => i >= 0).pop() ?? -1
+      const insertIndex = lastExerciseIndex >= 0 ? lastExerciseIndex + 1 : prev.length
+      const newItems = [...prev]
+      newItems.splice(insertIndex, 0, { id: Date.now().toString(), type: 'rest', duration: 60 })
+      return newItems
+    })
+  }, [])
 
-  const removeItem = (id: string) => {
-    if (workoutItems.length > 1) {
-      setWorkoutItems(workoutItems.filter(item => item.id !== id))
+  const removeItem = useCallback((id: string) => {
+    setWorkoutItems(prev => {
+      if (prev.length > 1) {
+        return prev.filter(item => item.id !== id)
+      }
+      return prev
+    })
+  }, [])
+
+  const updateItem = useCallback((id: string, updates: Partial<WorkoutItem>) => {
+    setWorkoutItems(prev =>
+      prev.map(item => 
+        item.id === id ? { ...item, ...updates } as WorkoutItem : item
+      )
+    )
+  }, [])
+
+  const handleLike = useCallback(async (workoutId: string) => {
+    if (!user) return
+
+    try {
+      const isNowLiked = await toggleLike(workoutId, user.id)
+      setWorkouts((prev) =>
+        prev.map((w) =>
+          w.id === workoutId
+            ? { ...w, is_liked: isNowLiked, likes: isNowLiked ? w.likes + 1 : w.likes - 1 }
+            : w
+        )
+      )
+    } catch (error) {
+      console.error('Like toggle failed:', error)
+      alert("操作失敗，請稍後重試")
     }
-  }
+  }, [user])
 
-  const updateItem = (id: string, updates: Partial<WorkoutItem>) => {
-    setWorkoutItems(workoutItems.map(item => 
-      item.id === id ? { ...item, ...updates } as WorkoutItem : item
-    ))
-  }
-
-  const handleLike = async (workoutId: string) => {
+  const handleSaveTemplate = useCallback(async (workoutId: string) => {
     if (!user) return
 
-    const isNowLiked = await toggleLike(workoutId, user.id)
-    setWorkouts((prev) =>
-      prev.map((w) =>
-        w.id === workoutId
-          ? { ...w, is_liked: isNowLiked, likes: isNowLiked ? w.likes + 1 : w.likes - 1 }
-          : w
+    try {
+      const isSaved = await saveWorkoutAsTemplate(workoutId, user.id)
+      setWorkouts((prev) =>
+        prev.map((w) =>
+          w.id === workoutId ? { ...w, is_template: isSaved } : w
+        )
       )
-    )
-  }
-
-  const handleSaveTemplate = async (workoutId: string) => {
-    if (!user) return
-
-    const isSaved = await saveWorkoutAsTemplate(workoutId, user.id)
-    setWorkouts((prev) =>
-      prev.map((w) =>
-        w.id === workoutId ? { ...w, is_template: isSaved } : w
-      )
-    )
-  }
+    } catch (error) {
+      console.error('Template save failed:', error)
+      alert("保存失敗，請稍後重試")
+    }
+  }, [user])
 
   if (authLoading) {
     return (
@@ -830,8 +863,8 @@ export default function HomePage() {
                             if (emptyExercise) {
                               updateItem(emptyExercise.id, { name: preset })
                             } else {
-                              setWorkoutItems([
-                                ...workoutItems,
+                              setWorkoutItems(prev => [
+                                ...prev,
                                 { id: Date.now().toString(), type: 'exercise', name: preset, sets: 3, reps: 10 }
                               ])
                             }

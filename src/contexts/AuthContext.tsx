@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, ReactNode } from "react"
-import { User, Session, AuthChangeEvent } from "@supabase/supabase-js"
+import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react"
+import { User, Session } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/client"
 import { Database } from "@/lib/supabase/database.types"
 
@@ -24,85 +24,172 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  
+  // 使用單一 Supabase 實例避免多次初始化
   const supabase = createClient()
+  
+  // 使用 useCallback 避免重複建立函數
+  const fetchProfile = useCallback(async (userId: string) => {
+    try {
+      // 設置 3 秒超時，避免無限等待
+      const fetchPromise = supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single()
+      
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+      )
+      
+      const { data, error } = await Promise.race([
+        fetchPromise,
+        timeoutPromise,
+      ]) as any
+      
+      if (error) {
+        console.warn('Profile fetch error:', error)
+        return null
+      }
+      return data
+    } catch (error) {
+      console.error('Profile fetch exception:', error)
+      return null
+    }
+  }, [supabase])
 
-  const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single()
-    return data
-  }
-
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (user) {
       const data = await fetchProfile(user.id)
       setProfile(data)
     }
-  }
+  }, [user, fetchProfile])
 
+  // 初始化認證狀態 - 只執行一次
   useEffect(() => {
-    const initAuth = async () => {
-      const { data: { session: currentSession } } = await supabase.auth.getSession()
-      setSession(currentSession)
-      setUser(currentSession?.user ?? null)
+    let mounted = true
 
-      if (currentSession?.user) {
-        const profileData = await fetchProfile(currentSession.user.id)
-        setProfile(profileData)
+    const initAuth = async () => {
+      try {
+        // 設置 5 秒超時，避免無限卡住
+        const sessionPromise = supabase.auth.getSession()
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Session fetch timeout')), 5000)
+        )
+        
+        const { data: { session: currentSession }, error: sessionError } = 
+          await Promise.race([sessionPromise, timeoutPromise]) as any
+        
+        if (sessionError) {
+          console.error('Session fetch error:', sessionError)
+          mounted && setIsLoading(false)
+          return
+        }
+
+        if (mounted) {
+          setSession(currentSession)
+          setUser(currentSession?.user ?? null)
+          setIsLoading(false)  // 先解除 loading，不等待 profile
+
+          // 如果有用戶，非 blocking 地取得 profile
+          if (currentSession?.user) {
+            fetchProfile(currentSession.user.id).then(profileData => {
+              mounted && setProfile(profileData)
+            })
+          }
+        }
+      } catch (error) {
+        console.error('Auth init error:', error)
+        // 錯誤時也要解除 loading
+        mounted && setIsLoading(false)
       }
-      setIsLoading(false)
     }
 
     initAuth()
 
+    // 訂閱認證狀態變化
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event: AuthChangeEvent, newSession: Session | null) => {
-        setSession(newSession)
-        setUser(newSession?.user ?? null)
+      async (_event, newSession) => {
+        if (!mounted) return
 
-        if (newSession?.user) {
-          const profileData = await fetchProfile(newSession.user.id)
-          setProfile(profileData)
-        } else {
-          setProfile(null)
+        try {
+          setSession(newSession)
+          setUser(newSession?.user ?? null)
+          setIsLoading(false)  // 先解除 loading
+
+          // 非 blocking 地獲取 profile
+          if (newSession?.user) {
+            fetchProfile(newSession.user.id).then(profileData => {
+              mounted && setProfile(profileData)
+            })
+          } else {
+            setProfile(null)
+          }
+        } catch (error) {
+          console.error('Auth state change error:', error)
+          setIsLoading(false)
         }
-        setIsLoading(false)
       }
     )
 
-    return () => subscription.unsubscribe()
-  }, [])
+    // Cleanup function
+    return () => {
+      mounted = false
+      subscription?.unsubscribe()
+    }
+  }, [supabase, fetchProfile])
 
-  const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-  }
+  const signInWithGoogle = useCallback(async () => {
+    try {
+      const redirectTo = `${window.location.origin}/auth/callback`
+      
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+        },
+      })
 
-  const signOut = async () => {
-    await supabase.auth.signOut()
-    setUser(null)
-    setProfile(null)
-    setSession(null)
+      if (error) {
+        console.error('Sign in error:', error)
+        throw error
+      }
+    } catch (error) {
+      console.error('Google sign in failed:', error)
+      throw error
+    }
+  }, [supabase])
+
+  const signOut = useCallback(async () => {
+    try {
+      const { error } = await supabase.auth.signOut()
+      
+      if (error) {
+        console.error('Sign out error:', error)
+        throw error
+      }
+
+      setUser(null)
+      setProfile(null)
+      setSession(null)
+    } catch (error) {
+      console.error('Sign out failed:', error)
+      throw error
+    }
+  }, [supabase])
+
+  const value: AuthContextType = {
+    user,
+    profile,
+    session,
+    isLoading,
+    signInWithGoogle,
+    signOut,
+    refreshProfile,
   }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        session,
-        isLoading,
-        signInWithGoogle,
-        signOut,
-        refreshProfile,
-      }}
-    >
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   )
