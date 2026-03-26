@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react"
-import { User, Session } from "@supabase/supabase-js"
+import { User, Session, AuthChangeEvent } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/client"
 import { Database } from "@/lib/supabase/database.types"
 
@@ -109,7 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // 訂閱認證狀態變化
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
+      async (_event: AuthChangeEvent, newSession: Session | null) => {
         if (!mounted) return
 
         try {
