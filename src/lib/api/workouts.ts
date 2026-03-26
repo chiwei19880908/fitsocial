@@ -223,6 +223,19 @@ async function updateStreak(supabase: ReturnType<typeof createClient>, userId: s
 }
 
 /**
+ * 刪除運動紀錄（只能刪除自己的）
+ */
+export async function deleteWorkoutLog(workoutLogId: string, userId: string) {
+  const supabase = createClient()
+  const { error } = await supabase
+    .from('workout_logs')
+    .delete()
+    .eq('id', workoutLogId)
+    .eq('user_id', userId) // RLS 二次確認：只能刪自己的
+  if (error) throw error
+}
+
+/**
  * 切換按讚狀態
  */
 export async function toggleLike(workoutLogId: string, userId: string) {

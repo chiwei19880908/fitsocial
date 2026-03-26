@@ -30,6 +30,7 @@ import {
   createWorkoutLog,
   toggleLike,
   saveWorkoutAsTemplate,
+  deleteWorkoutLog,
   WorkoutLogWithProfile,
 } from "@/lib/api/workouts"
 import { WorkoutType, Intensity } from "@/lib/supabase/types"
@@ -67,6 +68,7 @@ export default function HomePage() {
   const [isSavingUsername, setIsSavingUsername] = useState(false)
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false)
   const [selectedWorkoutDetail, setSelectedWorkoutDetail] = useState<WorkoutLogWithProfile | null>(null)
+  const [isDeletingWorkout, setIsDeletingWorkout] = useState(false)
   const [workouts, setWorkouts] = useState<WorkoutLogWithProfile[]>([])
   const [isLoadingWorkouts, setIsLoadingWorkouts] = useState(true)
 
@@ -914,8 +916,8 @@ export default function HomePage() {
           return gs
         }
         return (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onClick={() => setSelectedWorkoutDetail(null)}>
-            <div className="bg-white w-full max-w-lg rounded-t-3xl p-6 pb-10 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={() => setSelectedWorkoutDetail(null)}>
+            <div className="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-6 pb-10 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="font-bold text-lg text-slate-800">{w.category}</p>
@@ -1010,6 +1012,29 @@ export default function HomePage() {
                 })()
               ) : (
                 <p className="text-sm text-slate-400 text-center py-4">無詳細資料</p>
+              )}
+
+              {/* 刪除按鈕（只有自己的紀錄才顯示） */}
+              {w.user_id === user?.id && (
+                <button
+                  disabled={isDeletingWorkout}
+                  onClick={async () => {
+                    if (!confirm("確定要刪除這筆紀錄嗎？此操作無法還原。")) return
+                    setIsDeletingWorkout(true)
+                    try {
+                      await deleteWorkoutLog(w.id, user!.id)
+                      setWorkouts(prev => prev.filter(ww => ww.id !== w.id))
+                      setSelectedWorkoutDetail(null)
+                    } catch (err) {
+                      console.error("Delete failed:", err)
+                    } finally {
+                      setIsDeletingWorkout(false)
+                    }
+                  }}
+                  className="mt-5 w-full flex items-center justify-center gap-2 py-3 border border-red-100 text-red-500 rounded-2xl hover:bg-red-50 transition-colors text-sm font-medium disabled:opacity-40"
+                >
+                  {isDeletingWorkout ? <Loader2 className="w-4 h-4 animate-spin" /> : "🗑️ 刪除此紀錄"}
+                </button>
               )}
             </div>
           </div>
