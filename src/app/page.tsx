@@ -20,6 +20,8 @@ import {
   LogOut,
   X,
   Clock,
+  Pencil,
+  Check,
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import { useRouter } from "next/navigation"
@@ -33,7 +35,7 @@ import {
 import { WorkoutType, Intensity } from "@/lib/supabase/types"
 
 export default function HomePage() {
-  const { user, profile, isLoading: authLoading, signOut } = useAuth()
+  const { user, profile, isLoading: authLoading, signOut, refreshProfile } = useAuth()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<"home" | "search" | "add" | "bell" | "profile">("home")
   const [showWorkoutModal, setShowWorkoutModal] = useState(false)
@@ -60,6 +62,9 @@ export default function HomePage() {
     { id: '1', type: 'exercise', name: '', sets: 3, reps: 10 }
   ])
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isEditingUsername, setIsEditingUsername] = useState(false)
+  const [editUsernameValue, setEditUsernameValue] = useState("")
+  const [isSavingUsername, setIsSavingUsername] = useState(false)
   const [workouts, setWorkouts] = useState<WorkoutLogWithProfile[]>([])
   const [isLoadingWorkouts, setIsLoadingWorkouts] = useState(true)
 
@@ -727,8 +732,60 @@ export default function HomePage() {
               <div className="w-16 h-16 bg-gradient-to-br from-slate-100 to-slate-200 rounded-full flex items-center justify-center text-3xl">
                 {profile?.avatar_url || "🏋"}
               </div>
-              <div>
-                <p className="font-bold text-lg text-slate-800">{profile?.username || user?.email}</p>
+              <div className="flex-1 min-w-0">
+                {isEditingUsername ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      value={editUsernameValue}
+                      onChange={e => setEditUsernameValue(e.target.value)}
+                      maxLength={30}
+                      className="flex-1 min-w-0 border border-primary-300 rounded-xl px-3 py-1.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-primary-300"
+                    />
+                    <button
+                      disabled={isSavingUsername || !editUsernameValue.trim()}
+                      onClick={async () => {
+                        const trimmed = editUsernameValue.trim()
+                        if (!trimmed || !user) return
+                        setIsSavingUsername(true)
+                        try {
+                          const { createClient } = await import("@/lib/supabase/client")
+                          const supabase = createClient()
+                          const { error } = await supabase
+                            .from("profiles")
+                            .update({ username: trimmed })
+                            .eq("id", user.id)
+                          if (error) throw error
+                          await refreshProfile()
+                          setIsEditingUsername(false)
+                        } catch (err) {
+                          console.error("Failed to update username:", err)
+                        } finally {
+                          setIsSavingUsername(false)
+                        }
+                      }}
+                      className="text-green-500 hover:text-green-600 disabled:opacity-40"
+                    >
+                      {isSavingUsername ? <Loader2 className="w-5 h-5 animate-spin" /> : <Check className="w-5 h-5" />}
+                    </button>
+                    <button onClick={() => setIsEditingUsername(false)} className="text-slate-400 hover:text-slate-600">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <p className="font-bold text-lg text-slate-800 truncate">{profile?.username || user?.email}</p>
+                    <button
+                      onClick={() => {
+                        setEditUsernameValue(profile?.username || "")
+                        setIsEditingUsername(true)
+                      }}
+                      className="text-slate-400 hover:text-primary-500 flex-shrink-0"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
                 <p className="text-sm text-slate-400">{user?.email}</p>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-xs text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full">🔥 {profile?.streak_count ?? 0} 天連勝</span>
