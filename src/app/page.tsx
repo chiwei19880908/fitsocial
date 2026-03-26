@@ -136,35 +136,52 @@ export default function HomePage() {
     loadWorkouts()
   }, [loadWorkouts])
 
+  // 偵測連續重複的 segment 模式，回傳群組
+  type StoredAerobicSeg = { type: 'run'; distance: string; duration: number } | { type: 'rest'; duration: number }
+  type StoredStrengthSeg = { type: 'exercise'; name: string; sets: number; reps: number } | { type: 'rest'; duration: number }
+  type SegGroup<T> = { pattern: T[]; count: number }
+
+  function groupSegments<T>(segs: T[], eq: (a: T, b: T) => boolean): SegGroup<T>[] {
+    const groups: SegGroup<T>[] = []
+    let i = 0
+    while (i < segs.length) {
+      let bestW = 1, bestC = 1
+      const maxW = Math.floor((segs.length - i) / 2)
+      for (let w = 1; w <= maxW; w++) {
+        const pat = segs.slice(i, i + w)
+        let c = 1, j = i + w
+        while (j + w <= segs.length && pat.every((s, k) => eq(s, segs[j + k]))) { c++; j += w }
+        if (c > 1 && w * c >= bestW * bestC) { bestW = w; bestC = c }
+      }
+      groups.push({ pattern: segs.slice(i, i + bestW), count: bestC })
+      i += bestW * bestC
+    }
+    return groups
+  }
+
   const handleLogWorkout = useCallback(async () => {
     if (!user || !selectedCategory || !selectedMood) return
 
     setIsSubmitting(true)
     try {
-      let description = selectedMood
+      let details: Record<string, unknown>
       if (workoutType === "aerobic") {
-        const parts: string[] = []
-        aerobicSegments.forEach((seg) => {
-          if (seg.type === 'run') {
-            parts.push(`${seg.distance} ${seg.duration}分`)
-          } else {
-            parts.push(`休息 ${seg.duration}秒`)
-          }
-        })
-        description = `${parts.join(" → ")}・${selectedMood}`
+        const segments: StoredAerobicSeg[] = aerobicSegments.map(seg =>
+          seg.type === 'run'
+            ? { type: 'run' as const, distance: seg.distance, duration: seg.duration }
+            : { type: 'rest' as const, duration: seg.duration }
+        )
+        details = { segments, mood: selectedMood }
       } else {
-        const parts: string[] = []
-        workoutItems.forEach((item) => {
-          if (item.type === 'exercise' && item.name) {
-            parts.push(`${item.name} ${item.sets}x${item.reps}`)
-          } else if (item.type === 'rest') {
-            parts.push(`休息 ${item.duration}秒`)
-          }
-        })
-        description = `${parts.join(" → ")}・${selectedMood}`
+        const segments: StoredStrengthSeg[] = workoutItems
+          .filter(item => item.type !== 'exercise' || (item as { name: string }).name)
+          .map(item =>
+            item.type === 'exercise'
+              ? { type: 'exercise' as const, name: (item as { name: string }).name, sets: (item as { sets: number }).sets, reps: (item as { reps: number }).reps }
+              : { type: 'rest' as const, duration: (item as { duration: number }).duration }
+          )
+        details = { segments, mood: selectedMood }
       }
-
-      const details = { description }
 
       await createWorkoutLog(
         user.id,
@@ -443,66 +460,179 @@ export default function HomePage() {
                     </span>
                   </div>
 
-                  {workout.type === "aerobic" ? (
-                    <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 mb-3">
-                      <div className="space-y-2">
-                        {(workout.details as { description?: string })?.description?.split("・").filter((p, i, arr) => i < arr.length - 1).map((item, i) => {
-                          const isRest = item.includes("休息")
-                          const parts = item.trim().split(/\s+/)
-                          
-                          if (isRest) {
-                            const seconds = item.match(/\d+/)?.[0] || "60"
-                            return (
-                              <div key={i} className="flex items-center gap-2 bg-indigo-100/50 rounded-xl px-3 py-2">
-                                <Clock className="w-4 h-4 text-indigo-500" />
-                                <span className="text-sm text-indigo-600 font-medium">休息 {seconds}秒</span>
-                              </div>
-                            )
+                  {(() => {
+                    const d = workout.details as {
+                      segments?: Array<{ type: string; distance?: string; duration?: number; name?: string; sets?: number; reps?: number }>
+                      mood?: string
+                      description?: string
+                    }
+
+                    // ── 新格式：segments 陣列 ──
+                    if (d?.segments) {
+                      type AeroSeg = { type: 'run'; distance: string; duration: number } | { type: 'rest'; duration: number }
+                      type StrSeg = { type: 'exercise'; name: string; sets: number; reps: number } | { type: 'rest'; duration: number }
+
+                      function eqAero(a: AeroSeg, b: AeroSeg) {
+                        if (a.type !== b.type) return false
+                        if (a.type === 'run' && b.type === 'run') return a.distance === b.distance && a.duration === b.duration
+                        if (a.type === 'rest' && b.type === 'rest') return a.duration === b.duration
+                        return false
+                      }
+                      function eqStr(a: StrSeg, b: StrSeg) {
+                        if (a.type !== b.type) return false
+                        if (a.type === 'exercise' && b.type === 'exercise') return a.name === b.name && a.sets === b.sets && a.reps === b.reps
+                        if (a.type === 'rest' && b.type === 'rest') return a.duration === b.duration
+                        return false
+                      }
+                      function groupSegs<T>(segs: T[], eq: (a: T, b: T) => boolean) {
+                        const gs: { pattern: T[]; count: number }[] = []
+                        let i = 0
+                        while (i < segs.length) {
+                          let bw = 1, bc = 1
+                          for (let w = 1; w <= Math.floor((segs.length - i) / 2); w++) {
+                            const pat = segs.slice(i, i + w)
+                            let c = 1, j = i + w
+                            while (j + w <= segs.length && pat.every((s, k) => eq(s, segs[j + k]))) { c++; j += w }
+                            if (c > 1 && w * c >= bw * bc) { bw = w; bc = c }
                           }
-                          
-                          const distance = parts[0] || ""
-                          const durationMatch = item.match(/(\d+)(?:分|$)/)
-                          const duration = durationMatch ? durationMatch[1] : ""
-                          
-                          if (distance || duration) {
-                            return (
-                              <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
-                                <div className="flex items-center gap-2">
-                                  <Activity className="w-4 h-4 text-blue-500" />
-                                  <span className="font-medium text-slate-700">{distance}</span>
+                          gs.push({ pattern: segs.slice(i, i + bw), count: bc })
+                          i += bw * bc
+                        }
+                        return gs
+                      }
+
+                      if (workout.type === 'aerobic') {
+                        const segs = d.segments as AeroSeg[]
+                        const groups = groupSegs(segs, eqAero)
+                        return (
+                          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 mb-3">
+                            <div className="space-y-2">
+                              {groups.map((g, gi) => (
+                                <div key={gi} className="flex items-start gap-2">
+                                  <div className="flex-1 space-y-1">
+                                    {g.pattern.map((seg, si) =>
+                                      seg.type === 'run' ? (
+                                        <div key={si} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                                          <div className="flex items-center gap-2">
+                                            <Activity className="w-4 h-4 text-blue-500" />
+                                            <span className="font-medium text-slate-700 text-sm">跑步 {seg.distance}</span>
+                                          </div>
+                                          <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-medium">{seg.duration}分</span>
+                                        </div>
+                                      ) : (
+                                        <div key={si} className="flex items-center gap-2 bg-indigo-100/50 rounded-xl px-3 py-2">
+                                          <Clock className="w-4 h-4 text-indigo-400" />
+                                          <span className="text-sm text-indigo-600">
+                                            休息 {(seg as { duration: number }).duration >= 60
+                                              ? `${(seg as { duration: number }).duration / 60}分鐘`
+                                              : `${(seg as { duration: number }).duration}秒`}
+                                          </span>
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                  {g.count > 1 && (
+                                    <span className="mt-1 shrink-0 bg-blue-500 text-white text-xs font-bold px-2 py-0.5 rounded-full self-center">×{g.count}</span>
+                                  )}
                                 </div>
-                                <span className="bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-medium">{duration}分</span>
-                              </div>
-                            )
-                          }
-                          return null
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-4 mb-3">
-                      <div className="space-y-2">
-                        {(workout.details as { description?: string })?.description?.split("・").filter((p, i, arr) => i < arr.length - 1).map((item, i, arr) => {
-                          const isRest = item.includes("休息")
-                          const match = item.match(/(\S+)\s*(\d+)x(\d+)/)
-                          return isRest ? (
-                            <div key={i} className="flex items-center gap-2 text-blue-500">
-                              <Clock className="w-4 h-4" />
-                              <span className="text-sm">休息 {item.match(/\d+/)?.[0]} 秒</span>
+                              ))}
                             </div>
-                          ) : match ? (
-                            <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
-                              <span className="font-medium text-slate-700">{match[1]}</span>
-                              <div className="flex items-center gap-3 text-sm">
-                                <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">{match[2]}組</span>
-                                <span className="bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full">{match[3]}下</span>
-                              </div>
+                          </div>
+                        )
+                      } else {
+                        const segs = d.segments as StrSeg[]
+                        const groups = groupSegs(segs, eqStr)
+                        return (
+                          <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-4 mb-3">
+                            <div className="space-y-2">
+                              {groups.map((g, gi) => (
+                                <div key={gi} className="flex items-start gap-2">
+                                  <div className="flex-1 space-y-1">
+                                    {g.pattern.map((seg, si) =>
+                                      seg.type === 'exercise' ? (
+                                        <div key={si} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                                          <span className="font-medium text-slate-700 text-sm">{(seg as { name: string }).name}</span>
+                                          <div className="flex items-center gap-2 text-xs">
+                                            <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">{(seg as { sets: number }).sets}組</span>
+                                            <span className="bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full">{(seg as { reps: number }).reps}下</span>
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div key={si} className="flex items-center gap-2 text-blue-500 px-3 py-1">
+                                          <Clock className="w-4 h-4" />
+                                          <span className="text-sm">休息 {(seg as { duration: number }).duration}秒</span>
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                  {g.count > 1 && (
+                                    <span className="mt-1 shrink-0 bg-purple-500 text-white text-xs font-bold px-2 py-0.5 rounded-full self-center">×{g.count}</span>
+                                  )}
+                                </div>
+                              ))}
                             </div>
-                          ) : null
-                        })}
+                          </div>
+                        )
+                      }
+                    }
+
+                    // ── 舊格式：description 字串（向下相容）──
+                    if (workout.type === 'aerobic') {
+                      return (
+                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-2xl p-4 mb-3">
+                          <div className="space-y-1">
+                            {d?.description?.split("・")[0]?.split(" → ").map((item, i) => {
+                              const isRest = item.includes("休息")
+                              if (isRest) {
+                                return (
+                                  <div key={i} className="flex items-center gap-2 bg-indigo-100/50 rounded-xl px-3 py-2">
+                                    <Clock className="w-4 h-4 text-indigo-400" />
+                                    <span className="text-sm text-indigo-600">休息 {item.match(/\d+/)?.[0]}秒</span>
+                                  </div>
+                                )
+                              }
+                              const parts = item.trim().split(/\s+/)
+                              const distance = parts[0] || ""
+                              const dur = item.match(/(\d+)分/)?.[1] || ""
+                              return (
+                                <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                                  <div className="flex items-center gap-2">
+                                    <Activity className="w-4 h-4 text-blue-500" />
+                                    <span className="font-medium text-slate-700 text-sm">跑步 {distance}</span>
+                                  </div>
+                                  {dur && <span className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full text-xs font-medium">{dur}分</span>}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )
+                    }
+                    return (
+                      <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-4 mb-3">
+                        <div className="space-y-1">
+                          {d?.description?.split("・")[0]?.split(" → ").map((item, i) => {
+                            const isRest = item.includes("休息")
+                            const match = item.match(/(\S+)\s*(\d+)x(\d+)/)
+                            return isRest ? (
+                              <div key={i} className="flex items-center gap-2 text-blue-500 px-3 py-1">
+                                <Clock className="w-4 h-4" />
+                                <span className="text-sm">休息 {item.match(/\d+/)?.[0]}秒</span>
+                              </div>
+                            ) : match ? (
+                              <div key={i} className="flex items-center justify-between bg-white/80 rounded-xl px-3 py-2">
+                                <span className="font-medium text-slate-700 text-sm">{match[1]}</span>
+                                <div className="flex items-center gap-2 text-xs">
+                                  <span className="bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full">{match[2]}組</span>
+                                  <span className="bg-pink-100 text-pink-600 px-2 py-0.5 rounded-full">{match[3]}下</span>
+                                </div>
+                              </div>
+                            ) : null
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )
+                  })()}
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-100">
                     <button
